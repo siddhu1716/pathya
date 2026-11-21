@@ -60,7 +60,7 @@ function Connect({ error }: { error: string }) {
   const field = "w-full rounded-xl border bg-white/[0.03] px-3 py-2.5 text-[15px] outline-none focus:border-white/30";
   return (
     <div className="min-h-[100dvh] max-w-sm mx-auto px-6 flex flex-col justify-center gap-4">
-      <h1 className="text-[22px] font-medium tracking-tight">Connect to QuickPick</h1>
+      <h1 className="text-[22px] font-medium tracking-tight">Connect to Pathya</h1>
       <p className="text-[14px] text-muted-foreground">{error}</p>
       <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); connect(srv, k); window.location.reload(); }}>
         <input className={field} value={srv} onChange={(e) => setSrv(e.target.value)} placeholder="Server (blank = this site), https://….trycloudflare.com" />
@@ -91,7 +91,7 @@ const Index = () => {
         <div className="max-w-xl mx-auto px-4 h-14 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
             <span className="w-7 h-7 rounded-md bg-primary text-primary-foreground flex items-center justify-center text-[13px] font-semibold">Q</span>
-            <span className="text-[15px] font-medium tracking-tight">QuickPick</span>
+            <span className="text-[15px] font-medium tracking-tight">Pathya</span>
           </div>
           <div className="flex items-center gap-2">
             {s.live.length > 0 && <Pill tone="ok"><Dot tone="ok" pulse /> On a call</Pill>}

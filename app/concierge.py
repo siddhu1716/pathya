@@ -46,7 +46,7 @@ def make_concierge(store, hh, kitchen, health):
 
     people = ", ".join(f"{k}: {v['name']}" for k, v in hh["people"].items())
     clinics = ", ".join(f"{k}: {v['doctor']}, {v['clinic']}" for k, v in hh["clinics"].items())
-    return Agent(name="QuickPick",
+    return Agent(name="Pathya",
                  instructions=CONCIERGE.format(user=hh["user"]["name"], people=people, clinics=clinics,
                                                now=datetime.now(IST).strftime("%a %d %b %Y %H:%M")),
                  tools=[order_groceries, book_doctor, check_in, call_for_list],

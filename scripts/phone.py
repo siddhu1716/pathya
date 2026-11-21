@@ -60,7 +60,7 @@ def point_number_here(host):
     if not numbers:
         return print(f"Twilio number {env['TWILIO_FROM']} not found on this account; incoming calls not set up.")
     numbers[0].update(voice_url=f"https://{host}/calls/incoming", voice_method="POST")
-    print(f"Incoming calls to {env['TWILIO_FROM']} now reach QuickPick.")
+    print(f"Incoming calls to {env['TWILIO_FROM']} now reach Pathya.")
 
 
 def main(port="8000"):

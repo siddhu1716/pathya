@@ -2,7 +2,7 @@
 @tailwind components;
 @tailwind utilities;
 
-/* QuickPick Experts - minimal dark theme (one theme; phone-first). HSL values, used by the shadcn components. */
+/* Pathya Experts - minimal dark theme (one theme; phone-first). HSL values, used by the shadcn components. */
 
 @layer base {
   :root {

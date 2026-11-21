@@ -1,4 +1,4 @@
-"""QuickPick Kitchen - Swiggy Instamart core (Phase 1).
+"""Pathya Kitchen - Swiggy Instamart core (Phase 1).
 The model can look things up and fill the cart. It cannot place an order:
 checkout is plain code, called only after a human says yes to the exact cart."""
 import asyncio, json, os, re, time

@@ -41,7 +41,7 @@ class FakeRealtime:
         self.sent, self.out = [], asyncio.Queue()
         self.script = [
             [{"type": "response.output_audio.delta", "delta": "QUJD"},
-             {"type": "response.output_audio_transcript.done", "transcript": "Hello, I am QuickPick, an AI assistant"},
+             {"type": "response.output_audio_transcript.done", "transcript": "Hello, I am Pathya, an AI assistant"},
              {"type": "response.done", "response": {"output": [{"type": "message"}]}}],
             [{"type": "input_audio_buffer.speech_started"},
              {"type": "conversation.item.input_audio_transcription.completed", "transcript": "We have 4 PM"},
@@ -106,7 +106,7 @@ def test_phone_bridge_runs_plan_and_hangs_up_after_goodbye():
     assert rt.sent[0]["type"] == "session.update" and update["audio"]["input"]["format"]["type"] == "audio/pcmu"
     assert {t["name"] for t in update["tools"]} >= {"book_slot", "end_call"}
     first = rt.sent[1]["item"]["content"][0]["text"]
-    assert rt.sent[1]["item"]["role"] == "system" and "QuickPick" in first and "AI" in first   # greeting says it is an AI
+    assert rt.sent[1]["item"]["role"] == "system" and "Pathya" in first and "AI" in first   # greeting says it is an AI
     assert rt.sent[2] == {"type": "response.create"}                                        # session prompt kept
     assert {"type": "input_audio_buffer.append", "audio": "AAAA"} in rt.sent                # caller audio -> model
     assert {"event": "media", "streamSid": "MZ1", "media": {"payload": "QUJD"}} in tw.sent  # model audio -> caller

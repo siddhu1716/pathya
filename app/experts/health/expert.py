@@ -3,6 +3,7 @@ brief, and turns a confirmed prescription into reminder calls. It never gives me
 it schedules, reminds and relays. It books only inside the family's window (enforced here)."""
 import time
 import urllib.parse
+from typing import Literal
 from datetime import datetime, timedelta, timezone
 
 from app.core import convo, lang, safety
@@ -18,7 +19,7 @@ NO_ADVICE = ("You never give medical advice: never suggest, start, stop or chang
 EMERGENCY = ("If they mention chest pain, breathlessness, fainting, sudden weakness on one side, heavy bleeding, "
              "or say it is an emergency: call alert_family at once, tell them calmly to call 108 now, and end the call (why=emergency).")
 
-CLINIC_CALL = """You are QuickPick, an AI assistant, phoning {clinic} for {user} to book an appointment
+CLINIC_CALL = """You are Pathya, an AI assistant, phoning {clinic} for {user} to book an appointment
 for {patient} (age {age}) with {doctor}. Your first sentence: "{greeting}" {speak}
 Use short sentences. Never pretend to be human.
 Share only the patient's name and age, the reason "{reason}" and the callback number {callback}.
@@ -27,7 +28,7 @@ Then call book_slot with one slot; it refuses anything outside the family's wind
 hold the earliest slot and call hold_slot. After booking, repeat date, time, doctor and what to bring once.
 Never discuss payment details. Finish with end_call."""
 
-CHECKIN_CALL = """You are QuickPick, an AI assistant, calling {patient} for {user}. Your first sentence: "{greeting}"
+CHECKIN_CALL = """You are Pathya, an AI assistant, calling {patient} for {user}. Your first sentence: "{greeting}"
 {speak} Speak simply, warmly and slowly.
 Purpose: {purpose}
 Ask one thing at a time: how they feel; anything new and since when; today's BP or sugar reading if they have
@@ -37,9 +38,28 @@ short English summary. {no_advice}
 End warmly and call end_call."""
 
 
+INTAKE_CALL = """You are Pathya, an AI assistant, calling {name} for {user}'s family to arrange a doctor's appointment.
+Your first sentence: "{greeting}" {speak} Use short sentences, one question at a time.
+Find out: who it is for ({members}); the reason for the visit, in their words; the hospital or doctor they prefer, if
+any (already saved: {clinics}), or the area; which days and what part of the day suit them (today is {today}); anything
+the clinic should know. Then call save_request with dates as YYYY-MM-DD, and read it back once.
+Never diagnose, never say whether a symptom is serious, never suggest a medicine or a test. If it sounds like an
+emergency (chest pain, breathlessness, fainting, sudden weakness on one side, heavy bleeding), tell them to call 108 now
+and end the call (why=emergency).
+Say Pathya will find the clinic and book inside their times, and that {user} confirms on the phone first.
+Finish with end_call."""
+
+
 def to_ist(text):
     dt = datetime.fromisoformat(str(text).strip().replace("Z", "+00:00"))
     return dt.replace(tzinfo=IST) if dt.tzinfo is None else dt.astimezone(IST)
+
+
+def _date(text):
+    try:
+        return datetime.fromisoformat(str(text).strip()[:10]).date()
+    except ValueError:
+        return None
 
 
 def fits(slot, start, end, part=None):
@@ -79,10 +99,10 @@ class HealthExpert(Expert):
     name, title = "health", "Health Expert"
     handles = ("doctor appointments, clinic bookings, check-in calls, questions for the doctor, "
                "prescriptions, medicine reminders, follow-ups")
-    call_kinds = {"book", "checkin"}
+    call_kinds = {"book", "checkin", "intake"}
 
-    def __init__(self, store, household):
-        self.store, self.hh = store, household
+    def __init__(self, store, household, path=None):
+        self.store, self.hh, self.path = store, household, path      # path: household.yaml, for clinics a human adds
 
     def person(self, key):
         """A household member, the user themself ("me"), or a member added in the app (no phone)."""
@@ -112,7 +132,65 @@ class HealthExpert(Expert):
         return rows[-1]["value"] if rows else []
 
     # ---- phone calls ----
+    def intake(self, who="me", via=None):
+        """Hand it over: Pathya calls (you, or a family member) to learn what is needed, then finds and books."""
+        to = (self.hh["user"] if who == "me" else self.hh["people"].get(who, {})).get("phone")
+        if not to:
+            raise ValueError("That person has no phone number in household.yaml.")
+        return self.store.add_job(self.name, "intake", who, {"who": who, "to": to, **({"via": via} if via else {})})
+
+    def _intake_plan(self, job):
+        from app.experts.family import profiles as P
+        who, user = job["payload"]["who"], self.hh["user"]["name"]
+        m = P.member(self.hh, self.store, who)
+        language = m["language"]
+        greeting = (lang.greet(language, "self", user) if who == "me" else lang.greet(language, "calling", user, m["name"]))
+        clinics = "; ".join(f"{c['doctor']} at {c['clinic']}" for c in self.hh["clinics"].values()) or "none"
+        members = ", ".join(x["name"] for x in P.members(self.hh, self.store))
+        plan = CallPlan(INTAKE_CALL.format(name=m["name"], user=user, greeting=greeting, speak=lang.speak(language),
+                                           members=members, clinics=clinics, today=datetime.now(IST).strftime("%a %d %b %Y")),
+                        greeting, max_minutes=6, language=language)
+        s = plan.saved
+
+        def save_request(patient: str, reason: str, hospital: str, doctor: str, area: str, from_date: str, to_date: str,
+                         part: Literal["morning", "afternoon", "evening", "any"], notes: str) -> str:
+            """What they need: who for, the reason in their words, where (or the area), and the days (YYYY-MM-DD)."""
+            s["request"] = {"patient": patient, "reason": reason, "hospital": hospital, "doctor": doctor, "area": area,
+                            "from": from_date, "to": to_date, "part": part, "notes": notes}
+            return "Saved. Read it back once, then ask if anything else is needed."
+
+        plan.tools = [save_request, convo.end_call_tool(s)]
+        return plan
+
+    def request_card(self, req):
+        """A booking request (from the intake call or the app form) -> a card: phone a saved clinic, or find one first."""
+        from app.experts.family import profiles as P
+        names = {m["name"].lower(): m["key"] for m in P.members(self.hh, self.store)}
+        patient = names.get(str(req.get("patient", "")).strip().lower(), req.get("patient_key") or "me")
+        start = _date(req.get("from")) or datetime.now(IST).date() + timedelta(days=1)
+        end = max(_date(req.get("to")) or start + timedelta(days=6), start)
+        part = req.get("part") if req.get("part") in PARTS else "any"
+        want = " ".join(str(req.get(k) or "") for k in ("hospital", "doctor")).lower()
+        clinic = next((k for k, c in self.hh["clinics"].items() if want.strip() and any(
+            w and (w in c["clinic"].lower() or w in c["doctor"].lower()) for w in (str(req.get("hospital") or "").lower(),
+                                                                                  str(req.get("doctor") or "").lower()))), None)
+        if not want.strip() and not req.get("area"):
+            clinic = self.person(patient).get("clinic") if patient != "me" else None
+            clinic = clinic if clinic in self.hh["clinics"] else None
+        where = (f"{self.hh['clinics'][clinic]['doctor']}, {self.hh['clinics'][clinic]['clinic']}" if clinic else
+                 " · ".join(x for x in (req.get("hospital"), req.get("doctor"), req.get("area")) if x) or "a clinic nearby")
+        request = {**req, "patient_key": patient, "window_start": f"{start}T00:00", "window_end": f"{end}T23:59", "part": part}
+        choices = ([{"id": "book", "label": f"Phone {self.hh['clinics'][clinic]['clinic']} to book"}] if clinic else
+                   [{"id": "find", "label": "Find the clinic and its number"}])
+        return Card(self.name, "bookreq", f"Appointment for {self.person(patient).get('name', patient)}",
+                    [f"Reason (their words): {req.get('reason') or 'not said'}", f"Where: {where}",
+                     f"When: {start:%a %d %b} to {end:%a %d %b}, {part}"] + ([f"Notes: {req['notes']}"] if req.get("notes") else []),
+                    question="Pathya books only inside these days and times.", choices=choices,
+                    payload={"request": request, "clinic": clinic})
+
     def call_plan(self, job):
+        if job["kind"] == "intake":
+            return self._intake_plan(job)
         p = job["payload"]
         pat, user = self.person(p["patient"]), self.hh["user"]
         if job["kind"] == "book":
@@ -198,6 +276,8 @@ class HealthExpert(Expert):
 
     async def after_call(self, job, saved):
         p = job["payload"]
+        if job["kind"] == "intake":
+            return self.request_card(saved["request"]) if saved.get("request") else None
         if job["kind"] == "book":
             if saved.get("booked"):
                 return self._booked_card(p, saved["booked"])
@@ -220,7 +300,7 @@ class HealthExpert(Expert):
         c, pat = self.hh["clinics"][p["clinic"]], self.person(p["patient"])
         when = to_ist(b["slot"])
         ics = make_ics(f"{p['patient']}-{when:%Y%m%d%H%M}", when, 30, f"{pat['name']} - {b['doctor']}", c["clinic"],
-                       f"Reason: {p['reason']}. Booked by QuickPick.")
+                       f"Reason: {p['reason']}. Booked by Pathya.")
         return Card(self.name, "booking", "Appointment booked",
                     [f"{when:%a %d %b, %I:%M %p} - {b['doctor']}", c["clinic"],
                      f"Fee: {b.get('fee') or 'not mentioned'}", f"Bring: {b.get('bring') or 'not mentioned'}"],
@@ -282,6 +362,34 @@ class HealthExpert(Expert):
 
     async def execute(self, card, choice):
         kind, p = card["kind"], card["payload"]
+        if kind == "bookreq" and choice == "book":
+            r = p["request"]
+            return {"ok": True, "message": "Calling the clinic.", "jobs": [self.book(
+                r["patient_key"], p["clinic"], r["window_start"], r["window_end"], None if r["part"] == "any" else r["part"],
+                r.get("reason") or "consultation")]}
+        if kind == "bookreq" and choice == "find":
+            import asyncio
+            from app.experts.health import finder
+            r = p["request"]
+            found = await asyncio.to_thread(finder.find_clinic, r.get("hospital"), r.get("doctor"), r.get("area"),
+                                            self.hh.get("city", "Hyderabad"))
+            if not found.get("phone_e164"):
+                return {"ok": False, "error": f"No phone number found for {found.get('clinic') or r.get('hospital')}. "
+                                              "Add it in household.yaml under clinics, or try another name."}
+            self.store.add_card(Card(self.name, "clinic", f"Found: {found['clinic']}",
+                                     [found.get("doctor") or "", f"Phone: {found.get('phone')}", found.get("address") or "",
+                                      f"Source: {found.get('source') or 'web search'}"],
+                                     question="Add it to your clinics (household.yaml) and phone them to book?",
+                                     choices=[{"id": "add", "label": "Add and phone them"}],
+                                     payload={"request": r, "found": found}).to_dict())
+            return {"ok": True, "message": f"Found {found['clinic']}. Check the new card before Pathya calls."}
+        if kind == "clinic" and choice == "add":
+            from app.experts.health import finder
+            r = p["request"]
+            key = finder.add_to_household(self.path, self.hh, p["found"])
+            return {"ok": True, "message": f"Added {p['found']['clinic']} to your clinics. Calling them now.",
+                    "jobs": [self.book(r["patient_key"], key, r["window_start"], r["window_end"],
+                                       None if r["part"] == "any" else r["part"], r.get("reason") or "consultation")]}
         if kind == "booking":
             out = {"ok": True, "ics": p["ics"]}
             if choice == "remind":

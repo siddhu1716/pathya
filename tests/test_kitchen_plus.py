@@ -79,7 +79,7 @@ def test_plan_card_order_and_menu_call(monkeypatch):
     job = st.job(jid)
     assert job["kind"] == "menu" and job["payload"]["to"] == "+919800000002" and job["payload"]["menu"]["day"] == "Mon"
     plan = k.call_plan(job)
-    assert "AI" in plan.greeting and "QuickPick" in plan.greeting and "Chapati, dal" in plan.instructions
+    assert "AI" in plan.greeting and "Pathya" in plan.greeting and "Chapati, dal" in plan.instructions
     tools = {f.__name__: f for f in plan.tools}
     tools["save_missing"](["1 kg toor dal"], "")
     assert asyncio.run(k.after_call(job, plan.saved)).kind == "order" and seen["text"] == "1 kg toor dal"

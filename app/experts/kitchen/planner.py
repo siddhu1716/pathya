@@ -31,7 +31,7 @@ def parse_line(line):
 
 # ---------- household memory ----------
 def remember_order(store, lines, store_name, when=None):
-    """Every placed order teaches QuickPick what this home buys: bought:<item> = count, quantity, last seen."""
+    """Every placed order teaches Pathya what this home buys: bought:<item> = count, quantity, last seen."""
     when = when or time.time()
     for line in lines:
         name, qty, price = parse_line(line)

@@ -1,6 +1,6 @@
-# AGENTS.md: QuickPick v2 (Experts)
+# AGENTS.md: Pathya v2 (Experts)
 
-QuickPick (family nutrition, from a phone call to the plate) phones a family's people (each member, the cook) and their clinic, in their language. It keeps a profile, personal targets, a food log and medicine reminders for every member; plans one menu with a plate per person; turns what people say into a Swiggy Instamart (or Zepto) order or a doctor's appointment; and waits for a human tap before anything is committed. Read docs/BUILD_V2.md before any task.
+Pathya (family nutrition, from a phone call to the plate) phones a family's people (each member, the cook) and their clinic, in their language. It keeps a profile, personal targets, a food log and medicine reminders for every member; plans one menu with a plate per person; turns what people say into a Swiggy Instamart (or Zepto) order or a doctor's appointment; and waits for a human tap before anything is committed. Read docs/BUILD_V2.md before any task.
 
 ## Hard rules: never break them, never "simplify" them away
 1. Only `swiggy.place()` may call Swiggy `checkout`, and only from a card the human tapped. Never retry checkout; on error, list active orders and stop.

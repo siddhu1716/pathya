@@ -129,7 +129,7 @@ export function ScanSheet({ open, onClose, who: initial = "me" }: { open: boolea
                 ))}
               </div>
               <Button className="w-full h-11" disabled={save.isPending} onClick={() => save.mutate(result.report)}>Save to {who === "me" ? "my" : `${name}'s`} profile</Button>
-              <p className="text-[12px] text-muted-foreground">Used to work out energy and protein targets. QuickPick never judges these numbers.</p>
+              <p className="text-[12px] text-muted-foreground">Used to work out energy and protein targets. Pathya never judges these numbers.</p>
             </Panel>
           )}
 

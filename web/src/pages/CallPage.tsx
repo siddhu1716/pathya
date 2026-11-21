@@ -159,14 +159,14 @@ export default function CallPage() {
           {phase === "ended" && "Call ended"}
           {phase === "error" && "Could not connect"}
         </span>
-        <p className="text-[28px] font-medium tracking-tight">QuickPick</p>
+        <p className="text-[28px] font-medium tracking-tight">Pathya</p>
         <p className="text-[14px] text-muted-foreground">{info ? `${info.expert} · talking with ${info.who} for ${info.user}` : " "}</p>
       </div>
 
       <div className="flex-1 w-full my-8 overflow-y-auto">
         <Bubbles lines={lines} />
         {phase === "ended" && (
-          <p className="text-center text-[14px] text-muted-foreground pt-6">Done. The result appears on the QuickPick home screen.</p>
+          <p className="text-center text-[14px] text-muted-foreground pt-6">Done. The result appears on the Pathya home screen.</p>
         )}
         {phase === "error" && <p className="text-center text-[14px] text-destructive">{error}</p>}
       </div>
@@ -183,7 +183,7 @@ export default function CallPage() {
             <PhoneOff className="!size-6" />
           </Button>
         )}
-        {phase === "ended" && <Button variant="outline" asChild><a href="/">Back to QuickPick</a></Button>}
+        {phase === "ended" && <Button variant="outline" asChild><a href="/">Back to Pathya</a></Button>}
       </div>
     </div>
   );

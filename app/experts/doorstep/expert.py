@@ -1,10 +1,10 @@
-"""Doorstep Expert: answers calls to the household's QuickPick number from people who are not in household.yaml,
+"""Doorstep Expert: answers calls to the household's Pathya number from people who are not in household.yaml,
 usually the delivery partner. It knows only what is on the way and the family's own delivery instructions,
 guides the partner in, never shares an OTP, payment detail or ID, and leaves the family a card."""
 from app.core import convo, lang
 from app.experts.base import CallPlan, Card, Expert
 
-DOORSTEP_CALL = """You are QuickPick, an AI assistant answering {user}'s phone. Your first sentence: "{greeting}"
+DOORSTEP_CALL = """You are Pathya, an AI assistant answering {user}'s phone. Your first sentence: "{greeting}"
 {speak} Use short, friendly sentences. Never pretend to be human.
 Most callers are delivery partners. What you know:
 - On the way to {user}: {orders}
@@ -55,7 +55,7 @@ class DoorstepExpert(Expert):
             """Tell the family right now, e.g. the delivery partner is at the gate."""
             s["notified"] = reason
             self.store.add_card(Card(self.name, "alert", f"Delivery: {reason}"[:80],
-                                     [reason, "The delivery partner is on the line with QuickPick."],
+                                     [reason, "The delivery partner is on the line with Pathya."],
                                      question="", choices=[{"id": "ok", "label": "On my way"}]).to_dict())
             return f"{user} has been told. Ask them to wait a minute."
 
@@ -74,7 +74,7 @@ class DoorstepExpert(Expert):
         if saved.get("message"):
             lines.append(f"Message from {saved['message'].get('from') or 'the caller'}: {saved['message']['text']}")
         caller = job["payload"].get("caller", "")
-        return Card(self.name, "info", f"QuickPick answered a call {caller}".strip(), lines, question="",
+        return Card(self.name, "info", f"Pathya answered a call {caller}".strip(), lines, question="",
                     choices=[{"id": "ok", "label": "OK"}])
 
     async def execute(self, card, choice):

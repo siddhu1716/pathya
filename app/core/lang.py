@@ -7,22 +7,22 @@ DEFAULT = "Telugu"
 # mode: calling (we phoned them) | answering (a household member phoned us) | phone (unknown caller) | self (the user)
 GREETINGS = {
     "Telugu": {
-        "calling": "నమస్కారం {name}, నేను QuickPick, {user} తరపున కాల్ చేస్తున్న AI అసిస్టెంట్‌ని.",
-        "answering": "నమస్కారం {name}, నేను QuickPick, {user} తరపున మాట్లాడుతున్న AI అసిస్టెంట్‌ని.",
-        "phone": "నమస్కారం, నేను QuickPick, {user} ఫోన్ ఎత్తిన AI అసిస్టెంట్‌ని.",
-        "self": "నమస్కారం {user}, నేను QuickPick, మీ AI అసిస్టెంట్‌ని.",
+        "calling": "నమస్కారం {name}, నేను Pathya, {user} తరపున కాల్ చేస్తున్న AI అసిస్టెంట్‌ని.",
+        "answering": "నమస్కారం {name}, నేను Pathya, {user} తరపున మాట్లాడుతున్న AI అసిస్టెంట్‌ని.",
+        "phone": "నమస్కారం, నేను Pathya, {user} ఫోన్ ఎత్తిన AI అసిస్టెంట్‌ని.",
+        "self": "నమస్కారం {user}, నేను Pathya, మీ AI అసిస్టెంట్‌ని.",
     },
     "Hindi": {
-        "calling": "नमस्ते {name}, मैं QuickPick हूँ, {user} की ओर से कॉल करने वाला AI असिस्टेंट।",
-        "answering": "नमस्ते {name}, मैं QuickPick हूँ, {user} की ओर से बात करने वाला AI असिस्टेंट।",
-        "phone": "नमस्ते, मैं QuickPick हूँ, {user} का फ़ोन उठाने वाला AI असिस्टेंट।",
-        "self": "नमस्ते {user}, मैं QuickPick हूँ, आपका AI असिस्टेंट।",
+        "calling": "नमस्ते {name}, मैं Pathya हूँ, {user} की ओर से कॉल करने वाला AI असिस्टेंट।",
+        "answering": "नमस्ते {name}, मैं Pathya हूँ, {user} की ओर से बात करने वाला AI असिस्टेंट।",
+        "phone": "नमस्ते, मैं Pathya हूँ, {user} का फ़ोन उठाने वाला AI असिस्टेंट।",
+        "self": "नमस्ते {user}, मैं Pathya हूँ, आपका AI असिस्टेंट।",
     },
     "English": {
-        "calling": "Hello {name}, I am QuickPick, an AI assistant calling for {user}.",
-        "answering": "Hello {name}, I am QuickPick, an AI assistant answering for {user}.",
-        "phone": "Hello, I am QuickPick, an AI assistant answering {user}'s phone.",
-        "self": "Hello {user}, I am QuickPick, your AI assistant.",
+        "calling": "Hello {name}, I am Pathya, an AI assistant calling for {user}.",
+        "answering": "Hello {name}, I am Pathya, an AI assistant answering for {user}.",
+        "phone": "Hello, I am Pathya, an AI assistant answering {user}'s phone.",
+        "self": "Hello {user}, I am Pathya, your AI assistant.",
     },
 }
 

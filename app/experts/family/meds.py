@@ -1,5 +1,5 @@
 """Medicines and reminder calls, per family member. Medicines are kept exactly as written (by hand, or from a
-prescription photo a human confirmed). QuickPick never suggests, starts, stops or changes a medicine or dose (rule 9):
+prescription photo a human confirmed). Pathya never suggests, starts, stops or changes a medicine or dose (rule 9):
 reminder calls only remind, and record the answer in the person's words.
 Each reminder call schedules the next day's when it is dialled, until the course (days as written) ends."""
 import time

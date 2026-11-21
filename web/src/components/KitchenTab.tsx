@@ -22,7 +22,7 @@ function Usuals({ state }: { state: AppState }) {
   const usuals = data?.usuals ?? [];
   const chosen = usuals.filter((u) => picked[u.name]);
   if (!usuals.length) {
-    return <Panel className="px-4 py-5 text-[14px] text-muted-foreground">Nothing yet. Every order teaches QuickPick what this home buys.</Panel>;
+    return <Panel className="px-4 py-5 text-[14px] text-muted-foreground">Nothing yet. Every order teaches Pathya what this home buys.</Panel>;
   }
   return (
     <div className="space-y-3">

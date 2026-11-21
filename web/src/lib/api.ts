@@ -1,4 +1,4 @@
-// Typed client for the QuickPick FastAPI backend (app/main.py). The Vite dev server proxies /api to :8000.
+// Typed client for the Pathya FastAPI backend (app/main.py). The Vite dev server proxies /api to :8000.
 
 export type Choice = { id: string; label: string };
 
@@ -153,7 +153,7 @@ export const ringIn = () => (localStorage.getItem("qp_ring") === "browser" ? "br
 export const setRingIn = (v: "phone" | "browser") => localStorage.setItem("qp_ring", v);
 const via = () => (ringIn() === "browser" ? "?via=browser" : "");
 
-/** fetch() against the QuickPick server, with the key. */
+/** fetch() against the Pathya server, with the key. */
 export const apiFetch = (path: string, init: RequestInit = {}) =>
   fetch(server() + path, { ...init, headers: { ...(init.headers || {}), ...(key() ? { "X-QuickPick-Key": key() } : {}) } });
 

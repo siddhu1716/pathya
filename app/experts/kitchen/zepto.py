@@ -1,4 +1,4 @@
-"""QuickPick Kitchen - Zepto backup for items Swiggy Instamart could not supply.
+"""Pathya Kitchen - Zepto backup for items Swiggy Instamart could not supply.
 Stricter than the Instamart path: the model gets NO Zepto tools. Code searches and fills the cart; the model only
 picks variants from the search results it is shown (structured output), and every pick is checked against them.
 Ordering (create_order) happens only in place(), only after a human tapped the card, and is never retried.

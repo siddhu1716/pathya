@@ -1,4 +1,4 @@
-"""QuickPick v2 - the Expert contract. One folder per Expert; the platform
+"""Pathya v2 - the Expert contract. One folder per Expert; the platform
 (caller, approvals, jobs, memory, safety) is shared by all of them."""
 from __future__ import annotations
 

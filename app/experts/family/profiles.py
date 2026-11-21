@@ -15,7 +15,7 @@ ACTIVITY = {"sedentary": 1.2, "light": 1.375, "active": 1.55}
 REFERENCE = {"source": "ICMR-NIN 2020 general reference (sedentary adult)",
              "kcal": 1885, "protein_g": 50, "carbs_g": 260, "fat_g": 55, "fibre_g": 30, "sugar_g": 47, "salt_g": 5}
 TEXT = ("name", "relation", "sex", "activity", "food", "allergies", "goal")
-NUMBERS = {"age": (1, 120), "height_cm": (50, 230), "weight_kg": (3, 250)}
+NUMBERS = {"age": (1, 120), "height_cm": (50, 230), "weight_kg": (3, 250), "target_weight_kg": (3, 250)}
 TARGET_KEYS = ("kcal", "protein_g", "carbs_g", "fat_g", "fibre_g", "sugar_g", "salt_g")
 RESERVED = {"me", "family", "home", "caller", "clinic"}
 ELDER_AGE = 60
@@ -61,8 +61,23 @@ def member(hh, store, key):
              conditions=list(prof.get("conditions") or []), goal=prof.get("goal") or "maintain",
              override=prof.get("override") or {}, body=prof.get("body") or {})
     m["elder"] = bool(m.get("age") and m["age"] >= ELDER_AGE)
+    m["goal_progress"] = progress(store, m)
     m["targets"] = targets(m)
     return m
+
+
+def progress(store, m):
+    """Bulk or cut with a goal weight: how far from the first recorded weight to the goal (0-100%). The family's own
+    goal, shown as distance travelled; never a judgement of the weight itself."""
+    target, goal = m.get("target_weight_kg"), m.get("goal")
+    seen = sorted((f["value"] for f in store.facts(m["key"], "weight:")), key=lambda v: v["ts"])
+    current = m.get("weight_kg") or (seen[-1]["kg"] if seen else None)
+    start = seen[0]["kg"] if seen else current
+    if goal not in ("bulk", "cut") or not target or not current or start == target:
+        return None
+    pct = max(0.0, min(1.0, (current - start) / (target - start)))
+    return {"start": start, "current": current, "target": target, "percent": round(pct * 100),
+            "left_kg": round(abs(target - current), 1)}
 
 
 def members(hh, store):
@@ -102,6 +117,11 @@ def save(store, hh, key, data):
         raise ValueError(f"activity must be one of: {', '.join(ACTIVITY)}.")
     if key == "me" or key in hh["people"]:
         prof.pop("name", None)                                       # names of yaml people come from household.yaml
+    if prof.get("weight_kg") and prof.get("weight_kg") != profile(store, key).get("weight_kg"):
+        import time
+        from datetime import datetime, timedelta, timezone
+        day = datetime.now(timezone(timedelta(hours=5, minutes=30))).strftime("%Y-%m-%d")
+        store.remember(key, f"weight:{day}", {"kg": prof["weight_kg"], "ts": time.time()}, "family")
     store.remember(key, "profile", prof, "family")
     return member(hh, store, key)
 

@@ -1,4 +1,4 @@
-"""QuickPick v2 web app: a JSON API for the phone-first UI in web/, plus the scheduler.
+"""Pathya v2 web app: a JSON API for the phone-first UI in web/, plus the scheduler.
 Tap = store.claim -> expert.execute -> store.finish. Nothing is committed without a human tap.
 Run: uvicorn app.main:app --reload --port 8000   (UI dev server: cd web && npm run dev)"""
 import asyncio
@@ -192,7 +192,7 @@ async def ask(body: Text, request: Request):
     try:
         run = await Runner.run(agent, body.text, max_turns=10)
     except Exception as err:
-        raise HTTPException(502, f"QuickPick could not finish that: {err}")
+        raise HTTPException(502, f"Pathya could not finish that: {err}")
     st.store.log("concierge", "ask", f"reply: {run.final_output}")
     return {"reply": run.final_output}
 
@@ -406,7 +406,7 @@ class Daily(BaseModel):
 
 @api.post("/home/call")
 def home_call(request: Request):
-    """QuickPick phones the user now (check-in: medicines they listed, meals, reorders)."""
+    """Pathya phones the user now (check-in: medicines they listed, meals, reorders)."""
     return {"job": _expert(request, "home").call_me(via=_via(request))}
 
 
@@ -427,6 +427,7 @@ def _member(request, key):
 
 def _family_view(st, m):
     from app.experts.family import checkups, meds as M
+    from app.experts.family import score as health_score
     from app.experts.family import profiles as P
     from app.experts.kitchen import pantry
     home = st.experts.get("home")
@@ -439,7 +440,8 @@ def _family_view(st, m):
             "today": pantry.today(st.store, st.household, m["key"], goal=goal), "activity": act,
             "meds": M.listed(st.store, m["key"]), "doses": M.today(st.store, m["key"]),
             "reminders": M.reminders_on(st.store, m["key"]), "daily_hour": home.daily_hour(m["key"]) if home else None,
-            "checkups": checkups.for_member(m), "watch": checkups.watch(st.store, m)}
+            "checkups": checkups.for_member(m), "watch": checkups.watch(st.store, m),
+            "health": health_score.score(st.store, m, home.daily_hour(m["key"]) if home else None)}
 
 
 def activity_today(store, key):
@@ -449,11 +451,12 @@ def activity_today(store, key):
 
 @api.get("/family")
 def family(request: Request):
-    from app.experts.family import board
     from app.experts.family import profiles as P
     st = _st(request)
-    return {"members": [_family_view(st, m) for m in P.members(st.household, st.store)],
-            "board": board.board(st.store, st.household), "goals": P.GOALS, "activity": list(P.ACTIVITY)}
+    members = [_family_view(st, m) for m in P.members(st.household, st.store)]
+    scored = sorted((v for v in members if v["health"]["score"] is not None), key=lambda v: -v["health"]["score"])
+    return {"members": members, "star": scored[0]["name"] if scored else None,
+            "about": members[0]["health"]["about"] if members else "", "goals": P.GOALS, "activity": list(P.ACTIVITY)}
 
 
 class NewMember(BaseModel):
@@ -479,9 +482,12 @@ def family_save(key: str, body: dict, request: Request):
     st = _st(request)
     _member(request, key)
     try:
-        return _family_view(st, P.save(st.store, st.household, key, body))
+        m = P.save(st.store, st.household, key, body)
     except (ValueError, TypeError) as err:
         raise HTTPException(400, str(err))
+    if "home" in st.experts:
+        st.experts["home"].default_daily()                 # e.g. an age of 60+ was just entered
+    return _family_view(st, m)
 
 
 @api.delete("/family/{key}")
@@ -505,7 +511,7 @@ class MedIn(BaseModel):
 
 @api.post("/family/{key}/meds")
 def family_med_add(key: str, body: MedIn, request: Request):
-    """A medicine exactly as written on the strip or paper. QuickPick only reminds (AGENTS.md rule 9)."""
+    """A medicine exactly as written on the strip or paper. Pathya only reminds (AGENTS.md rule 9)."""
     from app.experts.family import meds as M
     st = _st(request)
     _member(request, key)
@@ -541,7 +547,7 @@ def family_reminders(key: str, body: OnOff, request: Request):
     m = _member(request, key)
     phone = _expert(request, "home").phone(key)
     if body.on and not phone:
-        raise HTTPException(400, f"{m['name']} has no phone number in household.yaml, so QuickPick can't call.")
+        raise HTTPException(400, f"{m['name']} has no phone number in household.yaml, so Pathya can't call.")
     jobs = M.set_reminders(st.store, phone, key, body.on)
     return {"ok": True, "on": body.on, "jobs": jobs}
 
@@ -640,7 +646,7 @@ def family_daily(key: str, body: Daily, request: Request):
     home = _expert(request, "home")
     _member(request, key)
     if body.hour is None:
-        home.stop_daily(key)
+        home.turn_off_daily(key)
         return {"ok": True, "hour": None}
     if not 6 <= body.hour <= 22:
         raise HTTPException(400, "Pick an hour between 6 and 22.")
@@ -659,6 +665,37 @@ def health_book(body: Booking, request: Request):
     jid = _expert(request, "health").book(body.patient, body.clinic, body.window_start, body.window_end,
                                           None if body.part == "any" else body.part, body.reason, via=_via(request))
     return {"job": jid}
+
+
+@api.post("/health/intake/{who}")
+def health_intake(who: str, request: Request):
+    """Hand it over: Pathya calls and asks what is needed, then proposes the booking (one tap before any clinic call)."""
+    _member(request, who)
+    try:
+        return {"job": _expert(request, "health").intake(who, via=_via(request))}
+    except ValueError as err:
+        raise HTTPException(400, str(err))
+
+
+class BookRequest(BaseModel):
+    patient: str = "me"
+    hospital: str = ""
+    doctor: str = ""
+    area: str = ""
+    reason: str = ""
+    from_date: str = ""
+    to_date: str = ""
+    part: str = "any"
+
+
+@api.post("/health/request")
+def health_request(body: BookRequest, request: Request):
+    """'I know where': a hospital or doctor by name (saved or not). Saved ones are phoned after a tap; others are found
+    on the web first, and added to household.yaml only after another tap."""
+    m = _member(request, body.patient)
+    card = _expert(request, "health").request_card({**body.model_dump(), "patient": m["name"], "patient_key": m["key"],
+                                                    "from": body.from_date, "to": body.to_date})
+    return {"card": _st(request).store.add_card(card.to_dict())}
 
 
 @api.post("/health/checkin/{person}")
@@ -922,7 +959,7 @@ def _person_by_phone(hh, number):
 
 
 def _answer_incoming(st, caller, call_sid):
-    """Someone phoned QuickPick: the user and family members get the Family line (orders, food, medicines), the cook
+    """Someone phoned Pathya: the user and family members get the Family line (orders, food, medicines), the cook
     the Kitchen list call, anyone else the Doorstep Expert."""
     if "home" in st.experts and _digits(caller) and _digits(caller) == _digits(st.household["user"].get("phone")):
         jid = st.experts["home"].answered(call_sid)
@@ -945,7 +982,7 @@ def _call_problem(store, title, hint):
 
 
 TRIAL_HINT = ("The call connected but the AI never started. On a Twilio trial account the person hears a trial message "
-              "and must press any key before QuickPick speaks. Add funds to Twilio to remove it.")
+              "and must press any key before Pathya speaks. Add funds to Twilio to remove it.")
 
 
 async def _check_stream_started(st, jid, who, wait=5):
@@ -975,7 +1012,7 @@ def build_app(lifespan=None) -> FastAPI:
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.responses import JSONResponse
 
-    app = FastAPI(title="QuickPick Experts", lifespan=lifespan)
+    app = FastAPI(title="Pathya Experts", lifespan=lifespan)
     app.include_router(api)
 
     @app.middleware("http")
@@ -986,7 +1023,7 @@ def build_app(lifespan=None) -> FastAPI:
         if key and request.url.path.startswith("/api/") and request.method != "OPTIONS":
             given = request.headers.get("x-quickpick-key") or request.query_params.get("key") or ""
             if not hmac.compare_digest(given.encode(), key.encode()):
-                return JSONResponse({"detail": "QuickPick key needed."}, status_code=401)
+                return JSONResponse({"detail": "Pathya key needed."}, status_code=401)
         return await call_next(request)
 
     # The UI may be hosted elsewhere (Vercel) and call this server through the tunnel.
@@ -1016,7 +1053,7 @@ def build_app(lifespan=None) -> FastAPI:
 
     @app.post("/calls/incoming")
     async def call_incoming(request: Request):
-        """Twilio voice webhook for the QuickPick number. Household members get the Kitchen list call;
+        """Twilio voice webhook for the Pathya number. Household members get the Kitchen list call;
         anyone else (usually the delivery partner) gets the Doorstep Expert. Only Twilio-signed requests."""
         from twilio.request_validator import RequestValidator
         from app.core.caller import stream_twiml
@@ -1171,11 +1208,12 @@ async def lifespan(app: FastAPI):
         register(KitchenExpert(store, hh, agent_im, ops, zepto))
         if ops is None:
             app.state.tasks.add(asyncio.create_task(_keep_trying_swiggy(store, REGISTRY["kitchen"])))
-        register(HealthExpert(store, hh))
+        register(HealthExpert(store, hh, os.getenv("HOUSEHOLD", str(ROOT / "household.yaml"))))
         from app.experts.doorstep.expert import DoorstepExpert
         from app.experts.home.expert import HomeExpert
         register(DoorstepExpert(store, hh))
         register(HomeExpert(store, hh, REGISTRY["kitchen"]))
+        REGISTRY["home"].default_daily()                    # parents: evening check-in on unless switched off
         app.state.store, app.state.household, app.state.experts = store, hh, REGISTRY
         if twilio_ready():
             from twilio.rest import Client
@@ -1186,7 +1224,7 @@ async def lifespan(app: FastAPI):
         scheduler = asyncio.create_task(J.run_forever(store, dispatch, every=5))
         from app.core import tracker
         tracking = asyncio.create_task(tracker.run_forever(store, REGISTRY["kitchen"], every=60))
-        store.log("app", "start", f"QuickPick started (DRY_RUN={os.getenv('DRY_RUN', '1')})")
+        store.log("app", "start", f"Pathya started (DRY_RUN={os.getenv('DRY_RUN', '1')})")
         try:
             yield
         finally:

@@ -1,5 +1,5 @@
-"""Family line: QuickPick's calls with family members themselves (the user is "me").
-- Check-in call (kind "home"), when a member phones in or QuickPick calls them (now or every day): take a grocery order
+"""Family line: Pathya's calls with family members themselves (the user is "me").
+- Check-in call (kind "home"), when a member phones in or Pathya calls them (now or every day): take a grocery order
   (a cart card that still needs a tap), note what they ate (estimated calories, logged under that person), ask whether
   they took today's medicines AS WRITTEN (their answer recorded in their words, never judged), mark things that ran out,
   and suggest a simple dish from what is at home that fits their goal and plate notes.
@@ -18,7 +18,7 @@ from app.experts.family import profiles as P
 from app.experts.health.expert import NO_ADVICE
 from app.experts.kitchen import pantry
 
-HOME_CALL = """You are QuickPick, the family's AI assistant (set up by {user}). You are on the phone with {name}.
+HOME_CALL = """You are Pathya, the family's AI assistant (set up by {user}). You are on the phone with {name}.
 Your first sentence: "{greeting}" {speak} Keep every reply short (one or two sentences).
 {why}
 What you know (use it when it helps; never read it all out):
@@ -46,7 +46,7 @@ What you can do:
 {elder}Never read out order numbers or IDs. {emergency}
 Finish with end_call."""
 
-MEDS_CALL = """You are QuickPick, the family's AI assistant (set up by {user}), calling {name} with a medicine reminder.
+MEDS_CALL = """You are Pathya, the family's AI assistant (set up by {user}), calling {name} with a medicine reminder.
 Your first sentence: "{greeting}" {speak} Speak simply, warmly and slowly.
 Then say it is time for the {slot} medicines, exactly as written: {meds}. Read at most three at a time. Never change a
 name or a dose, and never add advice.
@@ -62,6 +62,11 @@ CHECKIN = ("ask one thing at a time: (1) only if medicines are due today, whethe
            "at home.")
 EMERGENCY = ("If they mention chest pain, breathlessness, fainting, sudden weakness on one side, heavy bleeding, or say "
              "it is an emergency: tell them calmly to call 108 now, call alert_family, and end the call (why=emergency).")
+
+
+DEFAULT_HOUR = 20
+PARENTS = ("mother", "father", "mom", "dad", "amma", "nanna", "appa", "papa", "mummy", "parent", "grand", "ammamma",
+           "nanamma", "thatha", "tata", "nani", "dadi", "aai", "baba")
 
 
 class HomeExpert(Expert):
@@ -83,7 +88,7 @@ class HomeExpert(Expert):
     def call(self, who="me", purpose="", run_at=None, daily_hour=None, via=None):
         to = self.phone(who)
         if not to:
-            raise ValueError(f"{self.member(who)['name']} has no phone number in household.yaml, so QuickPick can't call.")
+            raise ValueError(f"{self.member(who)['name']} has no phone number in household.yaml, so Pathya can't call.")
         payload = {"who": who, "to": to, "purpose": purpose or CHECKIN, **({"via": via} if via else {})}
         if daily_hour is not None:
             payload["daily_hour"] = daily_hour
@@ -93,7 +98,7 @@ class HomeExpert(Expert):
         return self.call("me", purpose, run_at, daily_hour, via)
 
     def answered(self, call_sid, who="me"):
-        """A family member phoned QuickPick: a call that has already 'run' (never dialled)."""
+        """A family member phoned Pathya: a call that has already 'run' (never dialled)."""
         jid = self.store.add_job(self.name, "home", who, {"who": who, "direction": "inbound"}, run_at=4102444800)
         self.store.start_job(jid)
         self.store.end_job(jid, True, {"call_sid": call_sid})
@@ -102,8 +107,25 @@ class HomeExpert(Expert):
     def daily(self, hour, who="me"):
         """One check-in call every day at `hour` (IST). Replaces any earlier schedule."""
         self.stop_daily(who)
+        self.store.forget(who, "daily_off")
         self.store.remember(who, "daily", {"hour": hour}, "app")
         return self.call(who, run_at=M.next_at(hour).timestamp(), daily_hour=hour)
+
+    def turn_off_daily(self, who="me"):
+        """The family switched it off: remembered, so the parents' default never turns it back on."""
+        self.stop_daily(who)
+        self.store.remember(who, "daily_off", True, "app")
+
+    def default_daily(self, hour=DEFAULT_HOUR):
+        """Parents and members 60+ with a household.yaml phone get the evening check-in by default (unless switched off)."""
+        started = []
+        for m in P.members(self.hh, self.store):
+            parent = m["elder"] or any(w in f"{m.get('relation', '')} {m['name']} {m['key']}".lower() for w in PARENTS)
+            if (parent and m["key"] != "me" and self.phone(m["key"]) and self.daily_hour(m["key"]) is None
+                    and not self.store.facts(m["key"], "daily_off")):
+                started.append(self.daily(hour, m["key"]))
+                self.store.log(self.name, m["key"], f"daily check-in on by default for {m['name']} ({hour}:00)")
+        return started
 
     def stop_daily(self, who="me"):
         self.store.forget(who, "daily")
@@ -253,7 +275,7 @@ class HomeExpert(Expert):
                 due = [x for x in M.today(self.store, who) if x["slot"] in slots]
                 relay = Card(self.name, "relay", f"{m['name']}: medicines not taken yet",
                              [f"In {m['name']}'s words: \"{words}\""] + [f"{x['slot']}: {', '.join(x['meds'])}" for x in due],
-                             question="QuickPick only reminds. Talk to them if you need to.",
+                             question="Pathya only reminds. Talk to them if you need to.",
                              choices=[{"id": "call", "label": f"Call {m['name']} again"}, {"id": "ok", "label": "OK"}],
                              payload={"who": who})
         if saved.get("ran_out"):
@@ -270,7 +292,7 @@ class HomeExpert(Expert):
             lines.append("Wanted: " + ", ".join(items) + " (no store connected, so no cart yet)")
         if job["kind"] == "meds" or (not lines and not saved.get("summary")):
             return None
-        title = "Your call with QuickPick" if who == "me" else f"QuickPick's call with {m['name']}"
+        title = "Your call with Pathya" if who == "me" else f"Pathya's call with {m['name']}"
         return Card(self.name, "info", title, [saved.get("summary") or "Call ended."] + lines, question="",
                     choices=[{"id": "ok", "label": "OK"}])
 

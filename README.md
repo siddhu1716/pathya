@@ -1,9 +1,11 @@
-# QuickPick
+# Pathya
+
+*Pathya (పథ్య / पथ्य): the diet that suits a particular person. Formerly QuickPick.*
 
 **Family nutrition, from a phone call to the plate.**
 
 Every family member has a different need: Nanna is told to cut sugar, Amma takes BP tablets, you want to bulk.
-Nobody follows a diet chart, and you can't check on everyone every day. QuickPick phones them in their own language
+Nobody follows a diet chart, and you can't check on everyone every day. Pathya phones them in their own language
 (Telugu first), asks what they ate and whether they took their medicines, plans one menu with a plate for each person,
 and turns what is missing into a Swiggy Instamart cart you approve with one tap.
 
@@ -29,7 +31,7 @@ and turns what is missing into a Swiggy Instamart cart you approve with one tap.
   ICOPE for older people, USPSTF), shown as "ask the doctor". It never diagnoses.
   - From 60: protein 1.0 g/kg, slower and gentler calls, and a factual note when logged meals stay low for two days.
 - **Own notes:** a cart item that clashes with someone's own notes (less sugar, a doctor's note, an allergy) is flagged
-  on the card. On calls, QuickPick reminds them of that note in its own words and offers a swap.
+  on the card. On calls, Pathya reminds them of that note in its own words and offers a swap.
 - **Watch:** an Apple Watch sends steps and active energy through an iPhone Shortcut (`POST /api/activity/<member>`).
   Today's energy target then follows what the watch measured.
 - **Food log:** meals said on a call or typed in the app, with estimated calories, protein, fibre and added sugar per
@@ -45,7 +47,7 @@ and turns what is missing into a Swiggy Instamart cart you approve with one tap.
 - **Leaderboard:** weekly points for habits (meals logged, close to your own targets, doses taken, calls answered).
   Readings and weight never score.
 
-QuickPick never diagnoses and never suggests, starts, stops or changes a medicine or dose (see [AGENTS.md](AGENTS.md)).
+Pathya never diagnoses and never suggests, starts, stops or changes a medicine or dose (see [AGENTS.md](AGENTS.md)).
 
 ## Run
 
@@ -81,7 +83,7 @@ phone / browser ──► OpenAI Realtime (gpt-realtime) ──► Expert tools 
 
 | Before the hackathon | At the hackathon |
 |---|---|
-| The idea (github.com/siddhu1716/QuickPick); its React UI shell was reused; its scraper backend was dropped | Swiggy and Zepto MCP ordering with tap-to-commit cards (first real order placed) |
+| The idea (the earlier QuickPick, github.com/siddhu1716/QuickPick); its React UI shell was reused; its scraper backend was dropped | Swiggy and Zepto MCP ordering with tap-to-commit cards (first real order placed) |
 | `docs/BUILD_V2.md` starter: store, scheduler, caller, safety check, Swiggy rules, Health Expert | Realtime calls in the browser, Twilio and Exotel, Telugu-first, language following, wrap-up rule |
 | | Family profiles, personal targets, per-person plates, food log, medicine reminder calls, leaderboard |
 | | Pantry, order tracking, Doorstep Expert, minimal dark phone-first UI, `run.sh` |

@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.core.store import Store
-from app.experts.family import board, meds as M, profiles as P
+from app.experts.family import meds as M, profiles as P, score as S
 from app.experts.home.expert import HomeExpert
 from app.experts.kitchen import pantry, planner as pl
 from app.experts.kitchen.expert import KitchenExpert
@@ -102,19 +102,93 @@ def test_reminder_call_reads_as_written_and_relays_a_missed_dose():
     assert store.job(out["jobs"][0])["kind"] == "home" and store.job(out["jobs"][0])["person"] == "amma"
 
 
-def test_food_log_per_person_and_leaderboard_counts_habits_only():
+def test_food_log_per_person_and_health_score_from_habits_only():
+    from datetime import datetime
     store = Store(":memory:")
     for text in ("2 idli", "rice, pappu", "2 chapati, dal"):
         asyncio.run(pantry.log_meal(store, text, "", who="amma", estimate=meal(600, protein=20, fibre=9)))
     asyncio.run(pantry.log_meal(store, "upma", "", who="me", estimate=meal(300)))
     assert pantry.today(store, HH, "amma")["total"]["kcal"] == 1800 and len(pantry.today(store, HH, "me")["meals"]) == 1
-    M.log_dose(store, "amma", "night", "yes", "vesukunnanu")
-    M.log_dose(store, "me", "night", "no", "marchipoyanu")
-    rows = {r["key"]: r for r in board.board(store, HH)["rows"]}
-    a = rows["amma"]["breakdown"]
-    assert a["meal"] == 15 and a["on_target"] == 10 and a["protein"] == 5 and a["fibre"] == 5 and a["dose"] == 10
-    assert rows["me"]["breakdown"]["dose"] == 0 and board.board(store, HH)["rows"][0]["key"] == "amma"
-    assert set(a) == set(board.POINTS)                                            # no points for readings or weight
+    now = datetime.now(M.IST).replace(hour=22, minute=0, second=0, microsecond=0).timestamp()
+    store.remember("amma", "meds", [{"name_as_written": "Tab. X", "night": True, "start": now - 10 * 86400}], "t")
+    M.log_dose(store, "amma", "night", "yes", "vesukunnanu", ts=now - 3600)
+    M.log_dose(store, "amma", "night", "yes", "", ts=now - 86400 - 3600)
+    store.remember("amma", f"activity:{M.day_key(now)}", {"steps": 7200, "active_kcal": 200, "source": "watch"}, "t")
+    amma = S.score(store, P.member(HH, store, "amma"), now=now)
+    parts = {p["part"]: p for p in amma["parts"]}
+    assert set(parts) == {"food", "medicines", "movement"} and amma["missing"] == ["checkins"]   # no daily call yet
+    assert parts["medicines"]["detail"].startswith("2 of 7 doses") and parts["movement"]["percent"] == 100
+    assert amma["score"] == round((40 * 1 / 7 + 30 * 2 / 7 + 15) / 85 * 100) and amma["label"] == "Room to grow"
+    assert any("Log meals every day" in t for t in parts["food"]["tips"])
+    assert S.score(store, P.member(HH, store, "me"), now=now)["score"] is not None              # one meal logged
+    assert S.score(Store(":memory:"), P.member(HH, store, "me"), now=now)["score"] is None       # nothing: no score
+    assert "never count" in amma["about"] and set(S.WEIGHTS) == {"food", "medicines", "movement", "checkins"}
+
+
+def test_parents_get_the_daily_check_in_by_default_unless_switched_off():
+    store = Store(":memory:")
+    home = HomeExpert(store, HH)
+    assert len(home.default_daily()) == 1 and home.daily_hour("amma") == 20 and home.daily_hour("me") is None
+    assert home.default_daily() == []                                           # never twice
+    home.turn_off_daily("amma")
+    assert home.default_daily() == [] and home.daily_hour("amma") is None      # the family's "off" sticks
+    home.daily(19, "amma")
+    assert home.daily_hour("amma") == 19 and not store.facts("amma", "daily_off")
+
+
+def test_goal_weight_progress():
+    store = Store(":memory:")
+    P.save(store, HH, "me", {"weight_kg": 60, "goal": "bulk", "target_weight_kg": 66})
+    assert P.member(HH, store, "me")["goal_progress"]["percent"] == 0
+    store.remember("me", "weight:2026-12-01", {"kg": 63, "ts": time.time() + 10}, "t")
+    store.remember("me", "profile", {**P.profile(store, "me"), "weight_kg": 63}, "t")
+    g = P.member(HH, store, "me")["goal_progress"]
+    assert g["percent"] == 50 and g["left_kg"] == 3
+    assert P.member(HH, store, "amma")["goal_progress"] is None                 # maintain: no goal bar
+
+
+def test_booking_saved_clinic_or_find_then_add_to_household(tmp_path, monkeypatch):
+    from app.experts.health import finder
+    from app.experts.health.expert import HealthExpert
+    assert finder.e164("040 2345 6789") == "+914023456789" and finder.e164("+91-98480-22338") == "+919848022338"
+    assert finder.e164("12345") == ""
+    yml = tmp_path / "household.yaml"
+    yml.write_text("user:\n  name: Shiva\nclinics:\n  rao:   # a comment stays\n    doctor: Dr. Rao\n"
+                   "    clinic: Sunrise Clinic\n    phone: '+919800000003'\npeople: {}\n", encoding="utf-8")
+    hh = {**HH, "clinics": dict(HH["clinics"])}
+    store = Store(":memory:")
+    h = HealthExpert(store, hh, path=str(yml))
+    card = h.request_card({"patient": "Amma", "hospital": "Sunrise", "reason": "knee pain", "from": "2026-12-01",
+                           "to": "2026-12-03", "part": "morning"})
+    assert card.kind == "bookreq" and card.choices[0]["id"] == "book" and card.payload["clinic"] == "rao"
+    job = store.job(asyncio.run(h.execute(card.to_dict(), "book"))["jobs"][0])
+    assert job["kind"] == "book" and job["payload"]["window_start"] == "2026-12-01T00:00" and job["payload"]["part"] == "morning"
+    new = h.request_card({"patient": "Amma", "hospital": "Care Hospitals", "doctor": "Dr. Kumar", "area": "Banjara Hills"})
+    assert new.choices[0]["id"] == "find"
+    monkeypatch.setattr(finder, "find_clinic", lambda *a, **k: {"clinic": "CARE Hospitals Banjara Hills", "doctor": "Dr. Kumar",
+                                                              "phone": "040 6165 6565", "phone_e164": "+914061656565",
+                                                              "address": "Road No. 1", "source": "https://example.org"})
+    out = asyncio.run(h.execute(new.to_dict(), "find"))
+    found = store.cards()[0]["card"]
+    assert out["ok"] and found["kind"] == "clinic" and "Phone: 040 6165 6565" in found["lines"]
+    assert not any(c.get("phone") == "+914061656565" for c in hh["clinics"].values())     # nothing added before the tap
+    added = asyncio.run(h.execute(found, "add"))
+    text = yml.read_text(encoding="utf-8")
+    assert "# a comment stays" in text and "+914061656565" in text and "care-hospitals-banjara-hills" in hh["clinics"]
+    assert store.job(added["jobs"][0])["payload"]["to"] == "+914061656565"
+
+
+def test_intake_call_asks_and_proposes_a_booking():
+    from app.experts.health.expert import HealthExpert
+    store = Store(":memory:")
+    h = HealthExpert(store, HH)
+    job = store.job(h.intake("me"))
+    plan = h.call_plan(job)
+    assert job["payload"]["to"] == HH["user"]["phone"] and "Never diagnose" in plan.instructions and "108" in plan.instructions
+    t = {f.__name__: f for f in plan.tools}
+    t["save_request"]("Amma", "BP review", "", "Dr. Rao", "", "2026-12-02", "2026-12-04", "evening", "")
+    card = asyncio.run(h.after_call(job, plan.saved))
+    assert card.kind == "bookreq" and card.payload["clinic"] == "rao" and card.payload["request"]["patient_key"] == "amma"
 
 
 def test_plan_prompt_has_each_eater_and_guests_and_plates_reach_the_cook():
@@ -251,7 +325,7 @@ def test_family_api(client, monkeypatch):
     fam = c.get("/api/family").json()
     nanna = next(m for m in fam["members"] if m["key"] == "nanna")
     assert nanna["today"]["total"]["kcal"] == 400 and "Mifflin" in nanna["today"]["targets"]["source"]
-    assert any(r["key"] == "nanna" and r["points"] == 5 for r in fam["board"]["rows"])
+    assert nanna["health"]["score"] == 4 and nanna["health"]["label"] == "Room to grow" and fam["star"]
     assert c.post("/api/family/amma/call?via=browser").json()["job"]
     assert c.delete("/api/family/amma").status_code == 409 and c.delete("/api/family/nanna").json()["ok"]
 
@@ -283,5 +357,5 @@ def test_scan_wearable_dose_and_plan_api(client, monkeypatch):
     amma = c.get("/api/family").json()["members"][1]
     assert amma["activity"]["steps"] == 8000 and amma["today"]["targets"]["kcal"] == base + 250
     assert "Apple Watch" in amma["today"]["targets"]["source"]
-    assert next(r for r in board.board(store, HH)["rows"] if r["key"] == "amma")["breakdown"]["steps"] == 5
+    assert any(p["part"] == "movement" and p["percent"] == 100 for p in amma["health"]["parts"])
     assert c.post("/api/kitchen/mealplan/fit", json={"day": 0, "who": "Amma"}).status_code == 409   # no plan yet

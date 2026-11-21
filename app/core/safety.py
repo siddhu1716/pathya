@@ -1,4 +1,4 @@
-"""Health safety net: every health text QuickPick sends or saves passes Amazon Bedrock
+"""Health safety net: every health text Pathya sends or saves passes Amazon Bedrock
 Guardrails (ApplyGuardrail) first. Denied topics: diagnosis, medicine advice, result reading."""
 import os
 from dataclasses import dataclass

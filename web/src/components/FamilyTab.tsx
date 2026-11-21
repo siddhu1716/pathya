@@ -123,7 +123,7 @@ function AddMember({ open, onClose }: { open: boolean; onClose: () => void }) {
         <form className="p-4 pb-8 space-y-3" onSubmit={(e) => { e.preventDefault(); if (name.trim()) add.mutate(); }}>
           <DrawerHeader className="px-0 text-left">
             <DrawerTitle className="font-medium">Add a family member</DrawerTitle>
-            <DrawerDescription>Track their plate and medicines. QuickPick calls only numbers in household.yaml.</DrawerDescription>
+            <DrawerDescription>Track their plate and medicines. Pathya calls only numbers in household.yaml.</DrawerDescription>
           </DrawerHeader>
           <input className={field} value={name} onChange={(e) => setName(e.target.value)} placeholder="Name (Nanna, Chinni ...)" autoFocus />
           <input className={field} value={relation} onChange={(e) => setRelation(e.target.value)} placeholder="Relation (father, sister ...)" />
@@ -246,7 +246,7 @@ function MedsPanel({ m }: { m: Member }) {
            sub={m.has_phone ? "At 9 AM, 2 PM and 9 PM, daily for the course" : "No phone in household.yaml"}
            onClick={() => remind.mutate(!m.reminders)}
            right={<span className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">{m.reminders ? "on" : "off"}</span>} />
-      <p className="text-[12px] text-muted-foreground px-1">QuickPick reminds and records answers in their words. It never suggests or changes a medicine or dose.</p>
+      <p className="text-[12px] text-muted-foreground px-1">Pathya reminds and records answers in their words. It never suggests or changes a medicine or dose.</p>
     </div>
   );
 }
@@ -296,7 +296,7 @@ function ProfilePanel({ m, fam, onRemoved }: { m: Member; fam: Family; onRemoved
       </div>
       <input className={field} value={p.allergies} onChange={set("allergies")} placeholder="Allergies (never on their plate)" />
       <input className={field} value={p.conditions} onChange={set("conditions")} placeholder="What the doctor said (sugar, BP ...)" />
-      <p className="text-[12px] text-muted-foreground">Used only to choose dishes and portions. QuickPick never diagnoses.</p>
+      <p className="text-[12px] text-muted-foreground">Used only to choose dishes and portions. Pathya never diagnoses.</p>
       {m.body && Object.keys(m.body).length > 0 && (
         <p className="text-[12px] font-mono text-muted-foreground">
           Body report{m.body.date ? ` ${m.body.date}` : ""}: {[m.body.body_fat_pct && `fat ${m.body.body_fat_pct}%`, m.body.skeletal_muscle_kg && `muscle ${m.body.skeletal_muscle_kg} kg`, m.body.bmr_kcal && `BMR ${m.body.bmr_kcal}`].filter(Boolean).join(" · ")}
@@ -331,7 +331,7 @@ function Checkups({ m }: { m: Member }) {
         </div>
       ))}
       <p className="px-4 py-3 text-[12px] text-muted-foreground">
-        What people {m.age}+ are usually offered. Ask the doctor which apply to {m.key === "me" ? "you" : m.name}. QuickPick never diagnoses.
+        What people {m.age}+ are usually offered. Ask the doctor which apply to {m.key === "me" ? "you" : m.name}. Pathya never diagnoses.
       </p>
     </Panel>
   );

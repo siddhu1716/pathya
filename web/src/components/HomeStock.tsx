@@ -28,7 +28,7 @@ export function AtHome({ state, compact = false }: { state: AppState; compact?: 
   if (!shelf.length) {
     return compact ? null : (
       <Panel className="px-4 py-5 text-[14px] text-muted-foreground">
-        Empty. Delivered orders land here, and QuickPick tells you when something is running low.
+        Empty. Delivered orders land here, and Pathya tells you when something is running low.
       </Panel>
     );
   }

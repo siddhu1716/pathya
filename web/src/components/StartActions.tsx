@@ -34,7 +34,7 @@ export function AskBox() {
       <form className="flex items-center gap-2 rounded-full border bg-card pl-4 pr-1.5 py-1.5 focus-within:border-white/30"
             onSubmit={(e) => { e.preventDefault(); if (text.trim()) ask.mutate(); }}>
         <input value={text} onChange={(e) => setText(e.target.value)} disabled={ask.isPending}
-               placeholder="Ask QuickPick anything…" className="flex-1 bg-transparent text-[15px] outline-none placeholder:text-muted-foreground min-w-0" />
+               placeholder="Ask Pathya anything…" className="flex-1 bg-transparent text-[15px] outline-none placeholder:text-muted-foreground min-w-0" />
         <Button type="submit" size="icon" className="h-9 w-9 shrink-0" disabled={ask.isPending || !text.trim()} aria-label="Send">
           {ask.isPending ? <Loader2 className="animate-spin" /> : <ArrowUp />}
         </Button>
@@ -65,7 +65,7 @@ export function StartActions({ state }: { state: AppState }) {
   const callMe = useMutation({ mutationFn: api.callMe, onSuccess: () => done(toPhone ? "Calling your phone" : "Ringing here: tap Answer"), onError: fail });
   const daily = useMutation({
     mutationFn: () => api.daily(state.daily_call == null ? 20 : null),
-    onSuccess: (r) => done(r.hour == null ? "Daily check-in off" : "QuickPick will call you every day at 8 PM"), onError: fail,
+    onSuccess: (r) => done(r.hour == null ? "Daily check-in off" : "Pathya will call you every day at 8 PM"), onError: fail,
   });
 
   const [list, setList] = useState("");
@@ -103,7 +103,7 @@ export function StartActions({ state }: { state: AppState }) {
       )}
       {state.phone && ring === "phone" && (
         <p className="px-1 pb-3 text-[12px] text-muted-foreground">
-          Twilio trial: after the short English message, press any key so QuickPick starts talking. Jio numbers can't receive these calls.
+          Twilio trial: after the short English message, press any key so Pathya starts talking. Jio numbers can't receive these calls.
         </p>
       )}
       <Panel className="divide-y overflow-hidden">
@@ -146,7 +146,7 @@ export function StartActions({ state }: { state: AppState }) {
             <form className="p-4 pb-8 space-y-3" onSubmit={(e) => { e.preventDefault(); booking.mutate(); }}>
               <DrawerHeader className="px-0 text-left">
                 <DrawerTitle className="font-medium">Book a doctor</DrawerTitle>
-                <DrawerDescription>QuickPick phones the clinic. Slots outside this window are refused by code.</DrawerDescription>
+                <DrawerDescription>Pathya phones the clinic. Slots outside this window are refused by code.</DrawerDescription>
               </DrawerHeader>
               <div className="grid grid-cols-2 gap-2">
                 <select className={field} value={book.patient} onChange={(e) => setBook({ ...book, patient: e.target.value })}>
@@ -169,7 +169,7 @@ export function StartActions({ state }: { state: AppState }) {
             <form className="p-4 pb-8 space-y-3" onSubmit={(e) => { e.preventDefault(); if (photo) rx.mutate(); }}>
               <DrawerHeader className="px-0 text-left">
                 <DrawerTitle className="font-medium">Read a prescription</DrawerTitle>
-                <DrawerDescription>QuickPick copies it exactly; reminders start only after you confirm.</DrawerDescription>
+                <DrawerDescription>Pathya copies it exactly; reminders start only after you confirm.</DrawerDescription>
               </DrawerHeader>
               <select className={field} value={rxFor} onChange={(e) => setRxFor(e.target.value)}>
                 <option value="me">{state.user} (me)</option>

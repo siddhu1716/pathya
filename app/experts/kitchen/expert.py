@@ -11,7 +11,7 @@ from app.experts.kitchen import planner as pl
 from app.experts.kitchen import swiggy as sw
 from app.experts.kitchen import zepto as zp
 
-LIST_CALL = """You are QuickPick, an AI assistant, talking with {who} for {user}'s family to take this week's grocery list.
+LIST_CALL = """You are Pathya, an AI assistant, talking with {who} for {user}'s family to take this week's grocery list.
 Your first sentence: "{greeting}" {speak} Speak simply and politely.
 Then say you are {why}. Ask what the kitchen needs; ask for quantities when missing.
 You may remind them of at most three usual items: {usual}.
@@ -33,7 +33,7 @@ def for_people(msg):
     return msg.strip()
 
 
-MENU_CALL = """You are QuickPick, an AI assistant, calling {who} for {user}'s family about tomorrow's cooking.
+MENU_CALL = """You are Pathya, an AI assistant, calling {who} for {user}'s family about tomorrow's cooking.
 Your first sentence: "{greeting}" {speak} Speak simply and politely.
 Then say you are calling about tomorrow's cooking. Tomorrow's menu: {menu}.
 Each person's plate (read these after the menu, at most three at a time): {plates}.
@@ -56,7 +56,7 @@ class KitchenExpert(Expert):
                                   run_at)
 
     def answered(self, person, call_sid):
-        """A household member phoned QuickPick: a list call that has already 'run' (never dialled)."""
+        """A household member phoned Pathya: a list call that has already 'run' (never dialled)."""
         jid = self.store.add_job(self.name, "list", person, {"person": person, "direction": "inbound"}, run_at=4102444800)
         self.store.start_job(jid)
         self.store.end_job(jid, True, {"call_sid": call_sid})
