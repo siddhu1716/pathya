@@ -7,7 +7,15 @@ def make_dispatch(store, experts, dial):
     async def dispatch(job):
         expert = experts[job["expert"]]
         if job["kind"] in expert.call_kinds:
-            sid = await asyncio.to_thread(dial, job["payload"]["to"], job["id"])
+            try:
+                sid = await asyncio.to_thread(dial, job["payload"]["to"], job["id"])
+            finally:
+                follow = getattr(expert, "dialled", None)          # e.g. schedule tomorrow's reminder, even if this failed
+                if follow:
+                    try:
+                        follow(job)
+                    except Exception as err:
+                        store.log(expert.name, job["id"], f"could not schedule the next call: {err}")
             store.log(expert.name, job["id"], f"calling {job['person']}")
             return {"call_sid": sid}
         card = await expert.run_task(job)

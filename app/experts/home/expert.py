@@ -1,125 +1,169 @@
-"""Home Expert: the user's own line. When the user phones QuickPick (or QuickPick phones them for the evening
-check-in) one call can: take a grocery order (a cart card that still needs a tap), note what they ate (estimated
-calories), ask whether they took the medicines THEY listed (recorded in their words, never judged), mark things
-that ran out, say what is at home and what is running low, and suggest a simple dish from what is at home.
-It never gives medical or diet advice and never commits anything."""
+"""Family line: QuickPick's calls with family members themselves (the user is "me").
+- Check-in call (kind "home"), when a member phones in or QuickPick calls them (now or every day): take a grocery order
+  (a cart card that still needs a tap), note what they ate (estimated calories, logged under that person), ask whether
+  they took today's medicines AS WRITTEN (their answer recorded in their words, never judged), mark things that ran out,
+  and suggest a simple dish from what is at home that fits their goal and plate notes.
+- Medicine reminder call (kind "meds"): at the dose time, reads that time's medicines exactly as written and asks
+  whether they were taken. "Not yet" becomes a card for the user. Never advice (AGENTS.md rule 9).
+Only members with a phone in household.yaml are called (rule 8)."""
 import time
+from datetime import datetime, timedelta
+from typing import Literal
 
 from app.core import convo, lang, safety
 from app.experts.base import CallPlan, Card, Expert
-from app.experts.health.expert import EMERGENCY, NO_ADVICE, next_at
+from app.experts.family import meds as M
+from app.experts.family import profiles as P
+from app.experts.health.expert import NO_ADVICE
 from app.experts.kitchen import pantry
 
-HOME_CALL = """You are QuickPick, {user}'s AI assistant for the home. You are on the phone with {user}.
+HOME_CALL = """You are QuickPick, the family's AI assistant (set up by {user}). You are on the phone with {name}.
 Your first sentence: "{greeting}" {speak} Keep every reply short (one or two sentences).
 {why}
 What you know (use it when it helps; never read it all out):
+- About {name}: {about}
+- {name}'s medicines due today, exactly as written: {meds}
+- {name} has eaten today: {eaten}
 - At home now: {at_home}
 - Running low: {low}
-- Eaten today so far: {eaten}
-- Medicines {user} listed: {meds}
-- Today's meal plan: {plan}
+- {name}'s plate notes in the family meal plan: {plate}
 What you can do:
-- Groceries: when {user} wants something (or agrees to reorder what is running low), call set_order with EVERY item
-  and quantity so far (each call replaces the list). Read it back, at most three items at a time. Say the cart will
-  be on their phone to approve with one tap; nothing is ordered before that tap. Never discuss payment details.
+- Groceries: when they want something (or agree to reorder what is running low), call set_order with EVERY item and
+  quantity so far (each call replaces the list). Read it back, at most three items at a time. Say the cart goes to
+  {user}'s phone to approve with one tap; nothing is ordered before that tap. Never discuss payment details.
 - Food: when they say what they ate, call log_food once per meal, in their words with amounts.
-- Medicines: only if medicines are listed and this is the check-in (or they bring it up), ask once whether they took
-  them and call medicine_taken with their answer in their words. {no_advice}
+- Medicines: only if medicines are due today, ask once whether they took them, reading names exactly as written, and
+  call medicine_taken with taken (yes, no or not_sure) and their answer in their words. {no_advice}
 - Ran out: when they say something is finished, call ran_out with those items, and offer to add them to the order.
-- Meal ideas: if asked what to eat or cook, suggest one or two simple home dishes from what is at home or today's
-  plan. These are ideas, not diet or medical advice: never mention calorie targets or illnesses.
+- Meal ideas: if asked what to eat or cook, suggest one or two simple home dishes from what is at home that fit their
+  goal and plate notes (for example less sugar: no sweets, tea without sugar). Ideas only: never mention illnesses,
+  numbers or targets, and never give medical or diet advice.
 Never read out order numbers or IDs. {emergency}
 Finish with end_call."""
 
-WHY_IN = "{user} phoned you. Ask how you can help: groceries, noting a meal, or what is at home."
-WHY_OUT = "This is {user}'s check-in call: {purpose}"
-CHECKIN = ("ask one thing at a time: (1) only if medicines are listed, whether they took them; (2) what they ate "
+MEDS_CALL = """You are QuickPick, the family's AI assistant (set up by {user}), calling {name} with a medicine reminder.
+Your first sentence: "{greeting}" {speak} Speak simply, warmly and slowly.
+Then say it is time for the {slot} medicines, exactly as written: {meds}. Read at most three at a time. Never change a
+name or a dose, and never add advice.
+Ask whether they have taken them, and call dose_taken with taken (yes, no or not_sure) and their answer in their words.
+If not yet, say gently that you will let {user} know; do not insist. {no_advice}
+{emergency}
+Finish with end_call."""
+
+WHY_IN = "{name} phoned you. Ask how you can help: groceries, noting a meal, medicines, or what is at home."
+WHY_OUT = "This is {name}'s check-in call: {purpose}"
+CHECKIN = ("ask one thing at a time: (1) only if medicines are due today, whether they took them; (2) what they ate "
            "today; (3) whether to reorder what is running low; then offer one dish idea for tomorrow from what is "
            "at home.")
-EMERGENCY_SELF = ("If they mention chest pain, breathlessness, fainting, sudden weakness on one side, heavy bleeding, "
-                  "or say it is an emergency: tell them calmly to call 108 now, and end the call (why=emergency).")
+EMERGENCY = ("If they mention chest pain, breathlessness, fainting, sudden weakness on one side, heavy bleeding, or say "
+             "it is an emergency: tell them calmly to call 108 now, call alert_family, and end the call (why=emergency).")
 
 
 class HomeExpert(Expert):
-    name, title = "home", "Home line"
-    handles = "the user's own calls: groceries, food log, medicine check-ins, what is at home"
-    call_kinds = {"home"}
+    name, title = "home", "Family line"
+    handles = "calls with family members: check-ins, groceries, food log, medicine reminders"
+    call_kinds = {"home", "meds"}
 
     def __init__(self, store, household, kitchen=None):
         self.store, self.hh, self.kitchen = store, household, kitchen
 
+    def member(self, key):
+        return P.member(self.hh, self.store, key)
+
+    def phone(self, key):
+        """Only household.yaml numbers (rule 8)."""
+        return self.hh["user"].get("phone") if key == "me" else (self.hh["people"].get(key) or {}).get("phone")
+
     # ---- entry points ----
-    def call_me(self, purpose="", run_at=None, daily_hour=None, via=None):
-        payload = {"to": self.hh["user"]["phone"], "purpose": purpose or CHECKIN, **({"via": via} if via else {})}
+    def call(self, who="me", purpose="", run_at=None, daily_hour=None, via=None):
+        to = self.phone(who)
+        if not to:
+            raise ValueError(f"{self.member(who)['name']} has no phone number in household.yaml, so QuickPick can't call.")
+        payload = {"who": who, "to": to, "purpose": purpose or CHECKIN, **({"via": via} if via else {})}
         if daily_hour is not None:
             payload["daily_hour"] = daily_hour
-        return self.store.add_job(self.name, "home", "me", payload, run_at)
+        return self.store.add_job(self.name, "home", who, payload, run_at)
 
-    def answered(self, call_sid):
-        """The user phoned QuickPick: a call that has already 'run' (never dialled)."""
-        jid = self.store.add_job(self.name, "home", "me", {"direction": "inbound"}, run_at=4102444800)
+    def call_me(self, purpose="", run_at=None, daily_hour=None, via=None):
+        return self.call("me", purpose, run_at, daily_hour, via)
+
+    def answered(self, call_sid, who="me"):
+        """A family member phoned QuickPick: a call that has already 'run' (never dialled)."""
+        jid = self.store.add_job(self.name, "home", who, {"who": who, "direction": "inbound"}, run_at=4102444800)
         self.store.start_job(jid)
         self.store.end_job(jid, True, {"call_sid": call_sid})
         return jid
 
-    def daily(self, hour):
+    def daily(self, hour, who="me"):
         """One check-in call every day at `hour` (IST). Replaces any earlier schedule."""
-        self.stop_daily()
-        self.store.remember("me", "daily", {"hour": hour}, "app")
-        return self.call_me(run_at=next_at(hour).timestamp(), daily_hour=hour)
+        self.stop_daily(who)
+        self.store.remember(who, "daily", {"hour": hour}, "app")
+        return self.call(who, run_at=M.next_at(hour).timestamp(), daily_hour=hour)
 
-    def stop_daily(self):
-        self.store.forget("me", "daily")
+    def stop_daily(self, who="me"):
+        self.store.forget(who, "daily")
         for j in self.store.upcoming():
-            if j["expert"] == self.name and "daily_hour" in j["payload"]:
+            if j["expert"] == self.name and j["kind"] == "home" and j["person"] == who and "daily_hour" in j["payload"]:
                 self.store.cancel(j["id"])
 
-    def daily_hour(self):
-        f = self.store.facts("me", "daily")
+    def daily_hour(self, who="me"):
+        f = [x for x in self.store.facts(who, "daily") if x["key"] == "daily"]
         return f[0]["value"]["hour"] if f else None
 
-    def meds(self):
-        """Medicines the user listed in household.yaml (user.meds) or confirmed from a prescription photo."""
-        listed = [str(m) for m in self.hh["user"].get("meds") or []]
-        rx = next((f["value"] for f in reversed(self.store.facts("me", "meds"))), []) or []
-        return listed + [m.get("name_as_written", "") for m in rx if isinstance(m, dict)]
+    def dialled(self, job):
+        """Called by the scheduler once a call is placed: the next daily check-in / tomorrow's dose reminder."""
+        who, p = job["person"], job["payload"]
+        later = datetime.now(M.IST) + timedelta(minutes=1)
+        if job["kind"] == "meds":
+            return M.schedule_next(self.store, self.phone(who), who, p["slot"], after=later)
+        if p.get("daily_hour") is not None and self.daily_hour(who) == p["daily_hour"]:
+            return self.call(who, run_at=M.next_at(p["daily_hour"], later).timestamp(), daily_hour=p["daily_hour"])
+        return None
 
-    # ---- the call ----
+    # ---- the calls ----
+    def _greeting(self, who, language):
+        user = self.hh["user"]["name"]
+        return lang.greet(language, "self", user) if who == "me" else lang.greet(language, "calling", user,
+                                                                                    self.member(who)["name"])
+
     def call_plan(self, job):
-        user, p = self.hh["user"], job["payload"]
-        inbound = p.get("direction") == "inbound"
-        language = lang.of(self.hh, user)
-        greeting = lang.greet(language, "self", user["name"])
+        return self._meds_plan(job) if job["kind"] == "meds" else self._home_plan(job)
+
+    def _home_plan(self, job):
+        who, p = job["person"], job["payload"]
+        m, user = self.member(who), self.hh["user"]["name"]
+        language = m["language"]
+        greeting = self._greeting(who, language)
         shelf = pantry.items(self.store)
-        eaten = pantry.today(self.store, self.hh)
-        plan_fact = next((f["value"] for f in self.store.facts("home", "mealplan")), None) or {}
-        first_day = (plan_fact.get("days") or [{}])[0]
-        why = (WHY_IN if inbound else WHY_OUT).format(user=user["name"], purpose=p.get("purpose") or CHECKIN)
+        eaten = pantry.today(self.store, self.hh, who)
+        due = M.today(self.store, who)
+        about = f"goal: {P.GOALS.get(m['goal'], m['goal'])}; food: {m.get('food') or 'veg'}" + \
+                (f"; never include (allergy): {m['allergies']}" if m.get("allergies") else "") + \
+                (f"; the doctor told the family: {', '.join(m['conditions'])} (for choosing dishes only; never mention it)"
+                 if m["conditions"] else "")
+        why = (WHY_IN if p.get("direction") == "inbound" else WHY_OUT).format(name=m["name"], purpose=p.get("purpose") or CHECKIN)
         plan = CallPlan(HOME_CALL.format(
-            user=user["name"], greeting=greeting, speak=lang.speak(language), why=why,
+            user=user, name=m["name"], greeting=greeting, speak=lang.speak(language), why=why, about=about,
+            meds="; ".join(f"{d['slot']}: {', '.join(d['meds'])}" for d in due) or "none",
+            eaten="; ".join(x["text"] for x in eaten["meals"]) or "nothing noted yet",
             at_home=", ".join(i["name"] for i in shelf[:25]) or "nothing recorded",
-            low=", ".join(i["name"] for i in shelf if i["low"]) or "nothing",
-            eaten="; ".join(m["text"] for m in eaten["meals"]) or "nothing noted yet",
-            meds=", ".join(self.meds()) or "none listed",
-            plan=" · ".join(f"{m['slot']}: {m['dish']}" for m in first_day.get("meals", [])) or "none",
-            no_advice=NO_ADVICE, emergency=EMERGENCY_SELF),
-            greeting, max_minutes=6, language=language)
+            low=", ".join(i["name"] for i in shelf if i["low"]) or "nothing", plate=self.plate(m) or "none",
+            no_advice=NO_ADVICE, emergency=EMERGENCY), greeting, max_minutes=6, language=language)
         s = plan.saved
 
         def set_order(items: list[str]) -> str:
             """The full grocery list so far, one entry per item with quantity. Each call replaces the list."""
             s["items"] = items
-            return "Saved. Read it back, at most three items at a time; the cart needs their tap in the app."
+            return f"Saved. Read it back, at most three items at a time; the cart needs {user}'s tap in the app."
 
         def log_food(meal: str, what: str) -> str:
             """One meal they ate today (breakfast, lunch, dinner or snack), in their words with amounts."""
             s.setdefault("meals", []).append({"meal": meal, "what": what})
             return "Noted."
 
-        def medicine_taken(answer: str) -> str:
-            """Their answer about the medicines they listed, in their words. Do not judge it."""
-            s["meds"] = answer
+        def medicine_taken(taken: Literal["yes", "no", "not_sure"], their_words: str) -> str:
+            """Whether they took today's medicines as written, and their answer in their words. Do not judge it."""
+            s["meds"] = {"taken": taken, "words": their_words}
             return "Noted. Do not comment on it."
 
         def ran_out(items: list[str]) -> str:
@@ -127,42 +171,94 @@ class HomeExpert(Expert):
             s["ran_out"] = sorted(set(s.get("ran_out", []) + items))
             return "Noted. Offer to add them to the order."
 
-        end_call = convo.end_call_tool(s)
-
-        plan.tools = [set_order, log_food, medicine_taken, ran_out, end_call]
+        plan.tools = [set_order, log_food, medicine_taken, ran_out, self._alert(m, s), convo.end_call_tool(s)]
         return plan
 
+    def _meds_plan(self, job):
+        who, slot = job["person"], job["payload"]["slot"]
+        m, user = self.member(who), self.hh["user"]["name"]
+        language = m["language"]
+        greeting = self._greeting(who, language)
+        due = [M.line(x) for x in M.active(M.listed(self.store, who), slot)] or ["(nothing listed any more)"]
+        plan = CallPlan(MEDS_CALL.format(user=user, name=m["name"], greeting=greeting, speak=lang.speak(language),
+                                         slot=slot, meds="; ".join(due), no_advice=NO_ADVICE, emergency=EMERGENCY),
+                        greeting, max_minutes=3, language=language)
+        s = plan.saved
+
+        def dose_taken(taken: Literal["yes", "no", "not_sure"], their_words: str) -> str:
+            """Whether they took this time's medicines as written, and their answer in their words. Do not judge it."""
+            s["meds"] = {"taken": taken, "words": their_words, "slot": slot}
+            return "Noted. Do not comment on it."
+
+        plan.tools = [dose_taken, self._alert(m, s), convo.end_call_tool(s)]
+        return plan
+
+    def _alert(self, m, s):
+        def alert_family(reason: str) -> str:
+            """Use at once if they describe an emergency or urgently ask for their family."""
+            s["alert"] = reason
+            self.store.add_card(Card(self.name, "alert", f"Urgent: {m['name']} needs you",
+                                     [reason, f"Call now: {self.phone(m['key']) or ''}"], question="",
+                                     choices=[{"id": "ok", "label": "I'm calling"}]).to_dict())
+            return "Family alerted. Tell them calmly to call 108 now if it is an emergency."
+        return alert_family
+
+    def plate(self, m):
+        plan = next((f["value"] for f in self.store.facts("home", "mealplan") if f["key"] == "mealplan"), None) or {}
+        for day in (plan.get("days") or [])[:1]:
+            for p in day.get("people") or []:
+                if str(p.get("who", "")).lower() in (m["name"].lower(), m["key"]):
+                    return p.get("plate")
+        return None
+
+    # ---- after the call ----
     async def after_call(self, job, saved):
-        lines = []
-        for m in saved.get("meals") or []:
+        who = job["person"]
+        m, lines = self.member(who), []
+        for meal in saved.get("meals") or []:
             try:
-                e = await pantry.log_meal(self.store, m["what"], m.get("meal", ""))
-                lines.append(f"{(m.get('meal') or 'Meal').title()}: {m['what']} (about {e['kcal']} kcal, "
+                e = await pantry.log_meal(self.store, meal["what"], meal.get("meal", ""), who=who)
+                lines.append(f"{(meal.get('meal') or 'Meal').title()}: {meal['what']} (about {e['kcal']} kcal, "
                              f"protein {e['protein_g']:.0f} g)")
             except Exception as err:
-                lines.append(f"Could not estimate {m['what']}: {err}")
+                lines.append(f"Could not estimate {meal['what']}: {err}")
+        relay = None
         if saved.get("meds"):
-            verdict = safety.check(f"Medicines: {saved['meds']}")
-            self.store.remember("me", f"medlog:{pantry.today_key()}",
-                                {"answer": verdict.text, "ts": time.time(), "meds": self.meds()}, "phone call")
-            lines.append(verdict.text + " (in your words)")
+            d = saved["meds"]
+            words = safety.check(d.get("words") or "").text                       # every health text (rule 9)
+            hour = datetime.now(M.IST).hour
+            due = M.today(self.store, who)
+            slots = [d["slot"]] if d.get("slot") else (
+                [x["slot"] for x in due if x["hour"] <= hour + 1 and not x["taken"]] or [x["slot"] for x in due[:1]])
+            for slot in slots:
+                M.log_dose(self.store, who, slot, d.get("taken", "not_sure"), words)
+            lines.append(f"Medicines ({', '.join(slots) or 'today'}): {d.get('taken')} - \"{words}\" (their words)")
+            if d.get("taken") != "yes" and who != "me" and slots:
+                due = [x for x in M.today(self.store, who) if x["slot"] in slots]
+                relay = Card(self.name, "relay", f"{m['name']}: medicines not taken yet",
+                             [f"In {m['name']}'s words: \"{words}\""] + [f"{x['slot']}: {', '.join(x['meds'])}" for x in due],
+                             question="QuickPick only reminds. Talk to them if you need to.",
+                             choices=[{"id": "call", "label": f"Call {m['name']} again"}, {"id": "ok", "label": "OK"}],
+                             payload={"who": who})
         if saved.get("ran_out"):
             gone = pantry.used_up(self.store, saved["ran_out"])
             lines.append("Finished at home: " + ", ".join(saved["ran_out"]) + (f" ({len(gone)} off the shelf)" if gone else ""))
-        hour = job["payload"].get("daily_hour")
-        if hour is not None and self.daily_hour() == hour:
-            self.call_me(run_at=next_at(hour).timestamp(), daily_hour=hour)       # tomorrow's check-in
         for line in lines:
             self.store.log(self.name, job["id"], line)
+        if relay:
+            self.store.add_card(relay.to_dict())
         items = saved.get("items") or []
         if items and self.kitchen is not None:
             return await self.kitchen.handle(", ".join(items), ref=job["id"])   # Instamart, else Zepto, else the list
         if items:
-            lines.append("Wanted: " + ", ".join(items) + " (Swiggy is offline, so no cart yet)")
-        if not lines and not saved.get("summary"):
+            lines.append("Wanted: " + ", ".join(items) + " (no store connected, so no cart yet)")
+        if job["kind"] == "meds" or (not lines and not saved.get("summary")):
             return None
-        return Card(self.name, "info", "Your call with QuickPick", [saved.get("summary") or "Call ended."] + lines,
-                    question="", choices=[{"id": "ok", "label": "OK"}])
+        title = "Your call with QuickPick" if who == "me" else f"QuickPick's call with {m['name']}"
+        return Card(self.name, "info", title, [saved.get("summary") or "Call ended."] + lines, question="",
+                    choices=[{"id": "ok", "label": "OK"}])
 
     async def execute(self, card, choice):
+        if card["kind"] == "relay" and choice == "call":
+            return {"ok": True, "jobs": [self.call(card["payload"]["who"])]}
         return {"ok": True}

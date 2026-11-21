@@ -85,8 +85,16 @@ class HealthExpert(Expert):
         self.store, self.hh = store, household
 
     def person(self, key):
-        """A household member, or the user themself ("me")."""
-        return self.hh["user"] if key == "me" else self.hh["people"][key]
+        """A household member, the user themself ("me"), or a member added in the app (no phone)."""
+        if key == "me":
+            return self.hh["user"]
+        if key in self.hh["people"]:
+            return self.hh["people"][key]
+        from app.experts.family.profiles import profile
+        prof = profile(self.store, key)
+        if not prof.get("added"):
+            raise KeyError(key)
+        return {"name": prof.get("name", key), "age": prof.get("age", "")}
 
     # ---- entry points: the Concierge's tools and the UI forms call these ----
     def book(self, patient, clinic, window_start, window_end, part, reason, run_at=None, via=None):
@@ -303,16 +311,17 @@ class HealthExpert(Expert):
         return {"ok": True}
 
     def _start_reminders(self, patient, rx):
+        """Confirmed prescription: medicines kept as written (same names replace older entries) and daily reminder
+        calls at the dose times for the course length (family/meds.py)."""
+        from app.experts.family import meds as M
         source = f"prescription {rx.get('doctor') or ''} {rx.get('date') or ''}".strip()
-        self.store.remember(patient, "meds", rx.get("meds", []), source)
+        new = [dict(m, start=time.time(), source=source) for m in rx.get("meds", []) if not m.get("unclear")]
+        names = {m.get("name_as_written") for m in new}
+        keep = [m for m in M.listed(self.store, patient) if m.get("name_as_written") not in names]
+        self.store.remember(patient, "meds", keep + new, source)
         for n, advice in enumerate(rx.get("advice_as_written", [])):
             self.store.remember(patient, f"advice:{n}", advice, source)    # the Kitchen Expert reads these
-        jobs = []
-        for part, hour in DOSE_HOURS.items():
-            names = [m.get("name_as_written") for m in rx.get("meds", []) if m.get(part)]
-            if names:
-                jobs.append(self.checkin(patient, f"Medicine reminder ({part}): {', '.join(names)}. "
-                                         "Ask if they have taken them.", run_at=next_at(hour).timestamp()))
+        jobs = M.set_reminders(self.store, self.person(patient).get("phone"), patient, True)
         if rx.get("review_after_days"):
             due = time.time() + max(0, rx["review_after_days"] - 3) * 86400
             jobs.append(self.store.add_job(self.name, "followup", patient,

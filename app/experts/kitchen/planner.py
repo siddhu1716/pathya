@@ -57,6 +57,15 @@ class Meal(BaseModel):
     dish: str
 
 
+class PersonDay(BaseModel):
+    who: str
+    plate: str
+    kcal: int
+    protein_g: int
+    fibre_g: int
+    sugar_g: int
+
+
 class Day(BaseModel):
     day: str
     meals: list[Meal]
@@ -65,6 +74,7 @@ class Day(BaseModel):
     carbs_g: int
     fat_g: int
     fibre_g: int
+    people: list[PersonDay]
 
 
 class Ingredient(BaseModel):
@@ -79,26 +89,43 @@ class MealPlan(BaseModel):
     notes: str
 
 
-PLAN = """You plan home meals for an Indian family. You are not a doctor or dietitian: never give medical or diet
-advice, never prescribe calories, never mention diseases.
-Household: {people} people. Diet: {diet}. Cuisine: {cuisine}. Weekly grocery budget: Rs {budget}.
+PLAN = """You plan home meals for an Indian family: one kitchen and one cook make one menu, but each person gets their
+own plate. You are not a doctor or dietitian: never diagnose, never give medical advice, never mention diseases, never
+make health claims, never prescribe.
+Who eats ({people} people{guests}):
+{eaters}
+Health notes are only what the family says the doctor told them, and goals are what the family chose. Use them ONLY to
+choose dishes, portions and simple swaps on that person's plate (for example "half rice, extra dal", "tea without
+sugar", "extra paneer and curd"). Never put an allergy item on that person's plate.
+Kitchen: {diet}. Cuisine: {cuisine}. Weekly grocery budget: Rs {budget}.
 Doctor's written advice in this home (use it ONLY to choose between dishes, e.g. less salt; never add claims): {advice}
 Recently bought (assume still at home unless perishable and older than 3 days): {bought}
 Family's notes: {notes}
 Plan {days} day(s) of breakfast, lunch and dinner the cook can make (simple, everyday dishes; reuse ingredients).
-For each day give ESTIMATED nutrition per person (kcal, protein, carbs, fat, fibre in grams).
-List the ingredients for the whole plan with practical shop quantities (e.g. "1 kg", "500 g", "2 litres");
-set have_it=true only when it is clearly in the recently bought list. Keep notes to one or two lines."""
+For each day give: the family menu; the ESTIMATED nutrition of the standard plate (kcal, protein, carbs, fat, fibre in
+grams); and in people, one entry per eater (who = their name exactly as above) with a one-line plate note and their
+ESTIMATED kcal, protein, fibre and added sugar (grams) for the day, aiming close to their own targets. Guests eat the
+standard plate.
+List the ingredients for the whole plan for {people} people with practical shop quantities (e.g. "1 kg", "500 g",
+"2 litres"); set have_it=true only when it is clearly in the recently bought list. Keep notes to one or two lines."""
 
 
-async def meal_plan(hh, store, days=3, notes=""):
+def plan_prompt(hh, store, days=3, notes="", eaters=None, guests=0):
+    """eaters: family member dicts (app/experts/family/profiles.py); None = everyone in the family."""
+    from app.experts.family import profiles as P
     k = hh.get("kitchen") or {}
+    eaters = P.members(hh, store) if eaters is None else eaters
     advice = "; ".join(str(f["value"]) for f in store.facts(prefix="advice:")) or "none"
     bought = ", ".join(f"{u['name']} ({u['days_ago']} days ago)" for u in usuals(store, 25)) or "nothing recorded"
+    who = "\n".join(f"- {P.describe(m)}" for m in eaters) or "- the family (no profiles yet)"
+    return PLAN.format(people=max(1, len(eaters) + guests), guests=f", including {guests} guest(s)" if guests else "",
+                       eaters=who, diet=k.get("diet", "vegetarian"), cuisine=k.get("cuisine", "Telugu home food"),
+                       budget=k.get("budget_week", 3000), advice=advice, bought=bought, notes=notes or "none", days=days)
+
+
+async def meal_plan(hh, store, days=3, notes="", eaters=None, guests=0):
     agent = Agent(name="Meal planner", output_type=MealPlan,
-                  instructions=PLAN.format(people=k.get("people", len(hh["people"]) + 1), diet=k.get("diet", "vegetarian"),
-                                           cuisine=k.get("cuisine", "Telugu home food"), budget=k.get("budget_week", 3000),
-                                           advice=advice, bought=bought, notes=notes or "none", days=days),
+                  instructions=plan_prompt(hh, store, days, notes, eaters, guests),
                   **({"model": MODEL} if MODEL else {}))
     run = await Runner.run(agent, f"Plan {days} days.", max_turns=1)
     return run.final_output.model_dump()

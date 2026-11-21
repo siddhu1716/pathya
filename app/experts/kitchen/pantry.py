@@ -91,11 +91,12 @@ class MealEstimate(BaseModel):
     carbs_g: float
     fat_g: float
     fibre_g: float
+    sugar_g: float
 
 
 MEAL = """Estimate the nutrition of this meal, as eaten by one adult in an Indian home. Use typical home portions
 when amounts are missing (1 katori dal, 2 rotis, 1 cup rice ...). The text may be Telugu, Hindi or English.
-Numbers only. These are estimates."""
+sugar_g is added sugar (sugar or jaggery in tea, sweets), not natural sugar in milk or fruit. Numbers only. Estimates."""
 
 
 async def estimate_meal(text):
@@ -121,9 +122,9 @@ async def log_meal(store, text, meal="", who="me", estimate=None, now=None):
     return entry
 
 
-def today(store, hh, who="me", now=None):
-    """Today's food log (IST day) against the person's daily reference."""
-    meals = [f["value"] for f in store.facts(who, f"meal:{today_key(now)}:")]
-    keys = ("kcal", "protein_g", "carbs_g", "fat_g", "fibre_g")
+def today(store, hh, who="me", now=None, goal=None):
+    """Today's food log (IST day) for one family member against their own targets (or the general reference)."""
+    meals = sorted((f["value"] for f in store.facts(who, f"meal:{today_key(now)}:")), key=lambda m: m.get("ts", 0))
+    keys = ("kcal", "protein_g", "carbs_g", "fat_g", "fibre_g", "sugar_g")
     total = {k: round(sum(m.get(k, 0) for m in meals), 1) for k in keys}
-    return {"meals": meals, "total": total, "targets": targets(hh), "estimated": True}
+    return {"meals": meals, "total": total, "targets": goal or {**targets(hh), "sugar_g": 47}, "estimated": True}

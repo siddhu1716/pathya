@@ -36,6 +36,7 @@ def for_people(msg):
 MENU_CALL = """You are QuickPick, an AI assistant, calling {who} for {user}'s family about tomorrow's cooking.
 Your first sentence: "{greeting}" {speak} Speak simply and politely.
 Then say you are calling about tomorrow's cooking. Tomorrow's menu: {menu}.
+Each person's plate (read these after the menu, at most three at a time): {plates}.
 Read the menu, at most three dishes at a time. Ask whether anything is missing in the kitchen to cook it.
 Call save_missing with every missing item and quantity in their words (an empty list if nothing is missing).
 Never discuss prices, payment, health or diets. Finish with end_call."""
@@ -105,8 +106,9 @@ class KitchenExpert(Expert):
         menu = "; ".join(f"{m['slot']}: {m['dish']}" for m in pay["menu"].get("meals", [])) or "not set"
         language = lang.of(self.hh, p)
         greeting = lang.greet(language, "calling", user, p["name"])
+        plates = "; ".join(f"{x['who']}: {x['plate']}" for x in pay["menu"].get("people") or []) or "the same for everyone"
         plan = CallPlan(MENU_CALL.format(who=p["name"], user=user, greeting=greeting, speak=lang.speak(language),
-                                         menu=menu), greeting, max_minutes=4, language=language)
+                                         menu=menu, plates=plates), greeting, max_minutes=4, language=language)
 
         def save_missing(items: list[str], notes: str) -> str:
             """Save what is missing in the kitchen for tomorrow's menu, with quantities, in the cook's words."""
@@ -121,16 +123,21 @@ class KitchenExpert(Expert):
     def cook(self):
         return next((k for k, p in self.hh["people"].items() if p.get("role") == "cook"), None)
 
-    def plan_card(self, plan, days):
+    def plan_card(self, plan, days, count=(None, 0)):
         cook = self.cook()
         need = [i for i in plan.get("ingredients", []) if not i.get("have_it")]
         lines = [f"{d['day']}: " + " · ".join(m["dish"] for m in d["meals"]) for d in plan.get("days", [])]
+        first = (plan.get("days") or [{}])[0]
+        lines += [f"{p['who']}'s plate: {p['plate']} (about {p['kcal']} kcal, protein {p['protein_g']} g)"
+                  for p in first.get("people") or []]
+        eaters, guests = count
+        who = (f" for {eaters + guests} people" if eaters is not None else "") + (f" ({guests} guests)" if guests else "")
         avg = lambda k: round(sum(d.get(k, 0) for d in plan["days"]) / max(1, len(plan["days"])))
         choices = [{"id": "order", "label": f"Order {len(need)} missing ingredients"}] if need else []
         if cook and plan.get("days"):
             choices.append({"id": "brief", "label": f"Call {self.hh['people'][cook]['name']} with tomorrow's menu"})
         choices.append({"id": "keep", "label": "Just keep the plan"})
-        return Card(self.name, "plan", f"Meal plan: next {days} day{'s' if days > 1 else ''}", lines,
+        return Card(self.name, "plan", f"Meal plan: next {days} day{'s' if days > 1 else ''}{who}", lines,
                     question="What next?", choices=choices,
                     warnings=[f"Estimated per person per day: {avg('kcal')} kcal, protein {avg('protein_g')} g. "
                               "Estimates only, not dietary advice."] + ([plan["notes"]] if plan.get("notes") else []),

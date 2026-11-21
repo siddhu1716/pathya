@@ -122,7 +122,9 @@ assert any("pharmacist" in w for w in mc.warnings) and any("Could not read" in w
 assert st2.facts("amma", "meds") == []
 out = asyncio.run(h.execute(mc.to_dict(), "confirm"))
 assert [f["value"] for f in st2.facts("amma", "advice:")] == ["Low salt diet"]
-assert sorted(st2.job(j)["kind"] for j in out["jobs"]) == ["checkin", "followup"]
+assert sorted(st2.job(j)["kind"] for j in out["jobs"]) == ["followup", "meds"]      # daily reminder + review
+mj = next(st2.job(j) for j in out["jobs"] if st2.job(j)["kind"] == "meds")
+assert mj["expert"] == "home" and mj["payload"]["slot"] == "morning" and [m["name_as_written"] for m in st2.facts("amma", "meds")[0]["value"]] == ["Tab. ABC 40"]   # unclear lines are not scheduled
 fj = next(st2.job(j) for j in out["jobs"] if st2.job(j)["kind"] == "followup")
 fc = asyncio.run(h.run_task(fj)); bj = st2.job(asyncio.run(h.execute(fc.to_dict(), "book"))["jobs"][0])
 assert bj["kind"] == "book" and bj["payload"]["part"] == "morning" and bj["payload"]["to"] == "+919800000003"

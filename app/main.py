@@ -232,6 +232,8 @@ class Reorder(BaseModel):
 class PlanAsk(BaseModel):
     days: int = 3
     notes: str = ""
+    eaters: list[str] | None = None                  # family member keys; None = everyone
+    guests: int = 0
 
 
 @api.get("/kitchen/overview")
@@ -266,13 +268,18 @@ async def kitchen_reorder(body: Reorder, request: Request):
 async def kitchen_mealplan(body: PlanAsk, request: Request):
     from app.experts.kitchen import planner as pl
     st = _st(request)
-    days = max(1, min(body.days, 7))
+    days, guests = max(1, min(body.days, 7)), max(0, min(body.guests, 20))
+    eaters = None if body.eaters is None else [_member(request, k) for k in body.eaters]
+    if eaters is not None and not eaters and not guests:
+        raise HTTPException(400, "Pick who is eating.")
     try:
-        plan = await pl.meal_plan(st.household, st.store, days, body.notes)
+        plan = await pl.meal_plan(st.household, st.store, days, body.notes, eaters=eaters, guests=guests)
     except Exception as err:
         raise HTTPException(502, f"Could not plan meals: {err}")
-    st.store.remember("home", "mealplan", {**plan, "made": time.time(), "for_days": days}, "meal planner")
-    aid = st.store.add_card(_expert(request, "kitchen").plan_card(plan, days).to_dict())
+    count = (len(eaters) if eaters is not None else None, guests)
+    st.store.remember("home", "mealplan", {**plan, "made": time.time(), "for_days": days,
+                                           "eaters": body.eaters, "guests": guests}, "meal planner")
+    aid = st.store.add_card(_expert(request, "kitchen").plan_card(plan, days, count).to_dict())
     return {"card": aid, "plan": plan}
 
 
@@ -314,15 +321,17 @@ def pantry_used(body: Used, request: Request):
 class Meal(BaseModel):
     text: str
     meal: str = ""
+    who: str = "me"
 
 
 @api.post("/kitchen/meal")
 async def log_meal(body: Meal, request: Request):
     from app.experts.kitchen import pantry
+    _member(request, body.who)
     if not body.text.strip():
-        raise HTTPException(400, "Say what you ate.")
+        raise HTTPException(400, "Say what was eaten.")
     try:
-        return await pantry.log_meal(_st(request).store, body.text.strip()[:300], body.meal)
+        return await pantry.log_meal(_st(request).store, body.text.strip()[:300], body.meal, who=body.who)
     except Exception as err:
         raise HTTPException(502, f"Could not estimate that meal: {err}")
 
@@ -350,13 +359,151 @@ def home_call(request: Request):
 
 @api.post("/home/daily")
 def home_daily(body: Daily, request: Request):
+    return family_daily("me", body, request)
+
+
+# ---------- family: members, profiles, targets, medicines, check-ins, leaderboard ----------
+def _member(request, key):
+    from app.experts.family import profiles as P
+    st = _st(request)
+    try:
+        return P.member(st.household, st.store, key)
+    except KeyError:
+        raise HTTPException(404, "No such family member.")
+
+
+def _family_view(st, m):
+    from app.experts.family import meds as M
+    from app.experts.kitchen import pantry
+    home = st.experts.get("home")
+    return {**{k: v for k, v in m.items() if k != "phone"},              # numbers stay on the server
+            "today": pantry.today(st.store, st.household, m["key"], goal=m["targets"]),
+            "meds": M.listed(st.store, m["key"]), "doses": M.today(st.store, m["key"]),
+            "reminders": M.reminders_on(st.store, m["key"]), "daily_hour": home.daily_hour(m["key"]) if home else None}
+
+
+@api.get("/family")
+def family(request: Request):
+    from app.experts.family import board
+    from app.experts.family import profiles as P
+    st = _st(request)
+    return {"members": [_family_view(st, m) for m in P.members(st.household, st.store)],
+            "board": board.board(st.store, st.household), "goals": P.GOALS, "activity": list(P.ACTIVITY)}
+
+
+class NewMember(BaseModel):
+    name: str
+    relation: str = ""
+
+
+@api.post("/family")
+def family_add(body: NewMember, request: Request):
+    from app.experts.family import profiles as P
+    st = _st(request)
+    try:
+        m = P.add(st.store, st.household, body.name, body.relation)
+    except ValueError as err:
+        raise HTTPException(400, str(err))
+    st.store.log("family", m["key"], f"added {m['name']} to the family")
+    return _family_view(st, m)
+
+
+@api.put("/family/{key}")
+def family_save(key: str, body: dict, request: Request):
+    from app.experts.family import profiles as P
+    st = _st(request)
+    _member(request, key)
+    try:
+        return _family_view(st, P.save(st.store, st.household, key, body))
+    except (ValueError, TypeError) as err:
+        raise HTTPException(400, str(err))
+
+
+@api.delete("/family/{key}")
+def family_remove(key: str, request: Request):
+    from app.experts.family import meds as M
+    from app.experts.family import profiles as P
+    st = _st(request)
+    if not P.remove(st.store, key):
+        raise HTTPException(409, "Only members added in the app can be removed; edit household.yaml for the others.")
+    M.set_reminders(st.store, None, key, False)
+    return {"ok": True}
+
+
+class MedIn(BaseModel):
+    name: str
+    dose: str = ""
+    times: list[str]
+    days: int | None = None
+    food: str = ""
+
+
+@api.post("/family/{key}/meds")
+def family_med_add(key: str, body: MedIn, request: Request):
+    """A medicine exactly as written on the strip or paper. QuickPick only reminds (AGENTS.md rule 9)."""
+    from app.experts.family import meds as M
+    st = _st(request)
+    _member(request, key)
+    try:
+        M.add(st.store, key, body.name, body.dose, body.times, body.days, body.food)
+    except ValueError as err:
+        raise HTTPException(400, str(err))
+    phone = _expert(request, "home").phone(key)
+    for slot in body.times:
+        if slot in M.SLOTS:
+            M.schedule_next(st.store, phone, key, slot)
+    return _family_view(st, _member(request, key))
+
+
+@api.delete("/family/{key}/meds/{index}")
+def family_med_remove(key: str, index: int, request: Request):
+    from app.experts.family import meds as M
+    st = _st(request)
+    _member(request, key)
+    if not M.remove(st.store, key, index):
+        raise HTTPException(404, "No such medicine.")
+    return _family_view(st, _member(request, key))
+
+
+class OnOff(BaseModel):
+    on: bool
+
+
+@api.post("/family/{key}/reminders")
+def family_reminders(key: str, body: OnOff, request: Request):
+    from app.experts.family import meds as M
+    st = _st(request)
+    m = _member(request, key)
+    phone = _expert(request, "home").phone(key)
+    if body.on and not phone:
+        raise HTTPException(400, f"{m['name']} has no phone number in household.yaml, so QuickPick can't call.")
+    jobs = M.set_reminders(st.store, phone, key, body.on)
+    return {"ok": True, "on": body.on, "jobs": jobs}
+
+
+@api.post("/family/{key}/call")
+def family_call(key: str, request: Request):
+    """Check-in call now: medicines as written, meals, groceries, one dish idea."""
+    _member(request, key)
+    try:
+        return {"job": _expert(request, "home").call(key, via=_via(request))}
+    except ValueError as err:
+        raise HTTPException(400, str(err))
+
+
+@api.post("/family/{key}/daily")
+def family_daily(key: str, body: Daily, request: Request):
     home = _expert(request, "home")
+    _member(request, key)
     if body.hour is None:
-        home.stop_daily()
+        home.stop_daily(key)
         return {"ok": True, "hour": None}
     if not 6 <= body.hour <= 22:
         raise HTTPException(400, "Pick an hour between 6 and 22.")
-    return {"ok": True, "hour": body.hour, "job": home.daily(body.hour)}
+    try:
+        return {"ok": True, "hour": body.hour, "job": home.daily(body.hour, key)}
+    except ValueError as err:
+        raise HTTPException(400, str(err))
 
 
 @api.post("/health/book")
@@ -380,8 +527,7 @@ def health_checkin(person: str, body: Checkin, request: Request):
 @api.post("/health/rx")
 async def health_rx(request: Request, patient: str = Form(...), photo: UploadFile = File(...)):
     from app.experts.health.rx import read_prescription
-    if patient != "me":
-        _person(request, patient)
+    _member(request, patient)
     try:
         rx = await asyncio.to_thread(read_prescription, await photo.read(), photo.content_type or "image/jpeg")
     except Exception as err:
@@ -632,14 +778,16 @@ def _person_by_phone(hh, number):
 
 
 def _answer_incoming(st, caller, call_sid):
-    """Someone phoned QuickPick: the user gets their Home line, household members the Kitchen list call,
-    anyone else the Doorstep Expert."""
+    """Someone phoned QuickPick: the user and family members get the Family line (orders, food, medicines), the cook
+    the Kitchen list call, anyone else the Doorstep Expert."""
     if "home" in st.experts and _digits(caller) and _digits(caller) == _digits(st.household["user"].get("phone")):
         jid = st.experts["home"].answered(call_sid)
-        st.store.log("caller", jid, f"incoming call from {st.household['user']['name']} (Home line)")
+        st.store.log("caller", jid, f"incoming call from {st.household['user']['name']} (Family line)")
         return jid
     person = _person_by_phone(st.household, caller)
-    if person and "kitchen" in st.experts:
+    if person and "home" in st.experts and st.household["people"][person].get("role") != "cook":
+        jid = st.experts["home"].answered(call_sid, person)
+    elif person and "kitchen" in st.experts:
         jid = st.experts["kitchen"].answered(person, call_sid)
     else:
         jid = st.experts["doorstep"].answered(call_sid, "".join(c for c in str(caller or "") if c.isdigit())[-4:])

@@ -79,6 +79,8 @@ def test_my_number_gets_the_home_line_in_telugu_and_a_cart_after(monkeypatch):
         return {"kcal": 300, "protein_g": 9.0, "carbs_g": 50.0, "fat_g": 6.0, "fibre_g": 4.0}
     monkeypatch.setattr(pantry, "estimate_meal", fake)
     pantry.stock(store, ["Basmati Rice 1 kg x1"], "swiggy", "O1")
+    from app.experts.family import meds as M
+    M.add(store, "me", "Tab. Vitamin D3 60K", "1", ["morning", "afternoon", "night"])
     jid = _answer_incoming(app.state, "+91 98000 00000", "CA1")              # the user's own number
     home = app.state.experts["home"]
     job = store.job(jid)
@@ -86,18 +88,22 @@ def test_my_number_gets_the_home_line_in_telugu_and_a_cart_after(monkeypatch):
     plan = home.call_plan(job)
     assert "నమస్కారం Shiva" in plan.greeting and "AI" in plan.greeting      # Telugu by default, says it is an AI
     assert "Basmati Rice 1 kg" in plan.instructions and "never suggest, start, stop or change" in plan.instructions
+    assert "Tab. Vitamin D3 60K 1" in plan.instructions                       # read exactly as written
     t = {f.__name__: f for f in plan.tools}
     t["set_order"](["2 litres milk", "1 kg tomatoes"])
     t["log_food"]("lunch", "rice and pappu")
     t["ran_out"](["rice"])
-    t["medicine_taken"]("yes, took it after breakfast")
+    t["medicine_taken"]("yes", "yes, took it after breakfast")
     t["end_call"]("Ordered milk and tomatoes", True, "all_done")
     card = asyncio.run(home.after_call(job, plan.saved))
     assert card.kind == "order" and seen == ["2 litres milk, 1 kg tomatoes"]            # still needs a tap
     assert pantry.today(store, HH)["total"]["kcal"] == 300 and pantry.items(store) == []
-    assert store.facts("me", "medlog:")[0]["value"]["answer"].endswith("after breakfast")
-    jid2 = _answer_incoming(app.state, "+919800000001", "CA2")                 # Amma still gets the Kitchen list call
-    assert store.job(jid2)["expert"] == "kitchen"
+    log = store.facts("me", "medlog:")[0]["value"]
+    assert log["taken"] == "yes" and log["words"].endswith("after breakfast")
+    jid2 = _answer_incoming(app.state, "+919800000001", "CA2")                 # Amma: the Family line, as herself
+    assert store.job(jid2)["expert"] == "home" and store.job(jid2)["person"] == "amma"
+    jid3 = _answer_incoming(app.state, "+919800000002", "CA3")                 # the cook: the Kitchen list call
+    assert store.job(jid3)["expert"] == "kitchen"
 
 
 def test_daily_check_in_reschedules_and_stops():
@@ -105,7 +111,7 @@ def test_daily_check_in_reschedules_and_stops():
     home = app.state.experts["home"]
     first = home.daily(20)
     assert home.daily_hour() == 20 and store.job(first)["payload"]["to"] == HH["user"]["phone"]
-    asyncio.run(home.after_call(store.job(first), {"summary": "Checked in"}))
+    home.dialled(store.job(first))                                             # placed (answered or not)
     assert len([j for j in store.upcoming() if j["expert"] == "home"]) == 2    # tomorrow's call queued
     home.stop_daily()
     assert home.daily_hour() is None and [j for j in store.upcoming() if j["expert"] == "home"] == []
@@ -129,7 +135,7 @@ def test_ring_in_browser_override_and_failed_call_card(monkeypatch):
     assert "did not connect" in card["title"] and "Shiva" in card["title"]
     from app.main import _check_stream_started
     asyncio.run(_check_stream_started(app.state, jid, "Shiva", wait=0))          # completed, but no audio stream
-    assert "press" in store.cards()[0]["card"]["title"] and "trial" in store.cards()[0]["card"]["lines"][0]
+    assert any("press" in c["card"]["title"] and "trial" in c["card"]["lines"][0] for c in store.cards())
 
 
 def test_swiggy_offline_falls_back_to_zepto_or_keeps_the_list(monkeypatch):

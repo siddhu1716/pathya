@@ -104,7 +104,7 @@ def client(monkeypatch):
     app.state.store, app.state.household = st, HH
     app.state.experts = {"kitchen": KitchenExpert(st, HH, None, object())}
 
-    async def fake_plan(hh, store, days=3, notes=""):
+    async def fake_plan(hh, store, days=3, notes="", **kw):
         return PLAN
     monkeypatch.setattr(pl, "meal_plan", fake_plan)
     with TestClient(app) as c:

@@ -63,7 +63,9 @@ def env():
     app = build_app()
     kitchen = FakeKitchen(store)
     app.state.store, app.state.household = store, HH
-    app.state.experts = {"kitchen": kitchen, "health": HealthExpert(store, HH), "doorstep": DoorstepExpert(store, HH)}
+    from app.experts.home.expert import HomeExpert
+    app.state.experts = {"kitchen": kitchen, "health": HealthExpert(store, HH), "doorstep": DoorstepExpert(store, HH),
+                         "home": HomeExpert(store, HH, kitchen)}
     with TestClient(app) as client:
         yield client, store, kitchen
 
@@ -168,7 +170,7 @@ def test_exotel_stream_needs_secret_and_routes_caller(env, monkeypatch):
     with client.websocket_connect("/exotel", headers=good) as ws:
         ws.send_text(json.dumps({"event": "start", "stream_sid": "S1",
                                  "start": {"stream_sid": "S1", "call_sid": "X7", "from": "09800000001"}}))
-    assert seen["job"]["expert"] == "kitchen" and seen["job"]["person"] == "amma"     # 0-prefixed Indian number
+    assert seen["job"]["expert"] == "home" and seen["job"]["person"] == "amma"        # 0-prefixed Indian number
     assert store.facts("amma", f"call:{seen['job']['id']}")
 
 
@@ -281,7 +283,7 @@ def test_incoming_calls_route_by_caller_and_need_twilio_signature(env, monkeypat
     r = ring("+91 98000 00001", "CA1")                                  # Amma, formatted differently
     assert r.status_code == 200 and "<Stream" in r.text
     amma = [j for j in store.recent_jobs(0) if j["result"] == {"call_sid": "CA1"}][0]
-    assert amma["expert"] == "kitchen" and amma["person"] == "amma" and amma["payload"]["direction"] == "inbound"
+    assert amma["expert"] == "home" and amma["person"] == "amma" and amma["payload"]["direction"] == "inbound"
     ring("+918888812345", "CA2")                                        # unknown: the delivery partner
     door = [j for j in store.recent_jobs(0) if j["result"] == {"call_sid": "CA2"}][0]
     assert door["expert"] == "doorstep" and door["payload"]["caller"] == "…2345"
