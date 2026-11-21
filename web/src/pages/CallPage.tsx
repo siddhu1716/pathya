@@ -59,6 +59,11 @@ export default function CallPage() {
 
   const send = (event: object) => dc.current?.readyState === "open" && dc.current.send(JSON.stringify(event));
 
+  async function decline() {
+    await api.decline(id!).catch(() => undefined);
+    window.location.href = "/";
+  }
+
   async function hangUp() {
     if (ending.current) return;
     ending.current = true;
@@ -171,17 +176,30 @@ export default function CallPage() {
         {phase === "error" && <p className="text-center text-[14px] text-destructive">{error}</p>}
       </div>
 
-      <div className="flex justify-center">
+      <div className="flex justify-center gap-16">
         {phase === "ringing" && info && (
-          <Button className="h-16 w-16 rounded-full bg-success text-black hover:bg-success/90" onClick={answer} aria-label="Answer">
-            <Phone className="!size-6" />
-          </Button>
+          <>
+            <div className="flex flex-col items-center gap-2">
+              <Button className="h-16 w-16 rounded-full bg-destructive text-white hover:bg-destructive/90" onClick={decline} aria-label="Decline">
+                <PhoneOff className="!size-6" />
+              </Button>
+              <span className="text-[12px] text-muted-foreground">Decline</span>
+            </div>
+            <div className="flex flex-col items-center gap-2">
+              <Button className="h-16 w-16 rounded-full bg-success text-black hover:bg-success/90" onClick={answer} aria-label="Answer">
+                <Phone className="!size-6" />
+              </Button>
+              <span className="text-[12px] text-muted-foreground">Answer</span>
+            </div>
+          </>
         )}
-        {phase === "connecting" && <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />}
-        {phase === "live" && (
-          <Button className="h-16 w-16 rounded-full" variant="destructive" onClick={hangUp} aria-label="Hang up">
-            <PhoneOff className="!size-6" />
-          </Button>
+        {(phase === "connecting" || phase === "live") && (
+          <div className="flex flex-col items-center gap-2">
+            <Button className="h-16 w-16 rounded-full bg-destructive text-white hover:bg-destructive/90" onClick={hangUp} aria-label="Hang up">
+              {phase === "connecting" ? <Loader2 className="!size-6 animate-spin" /> : <PhoneOff className="!size-6" />}
+            </Button>
+            <span className="text-[12px] text-muted-foreground">{phase === "connecting" ? "Connecting · tap to cancel" : "Hang up"}</span>
+          </div>
         )}
         {phase === "ended" && <Button variant="outline" asChild><a href="/">Back to Pathya</a></Button>}
       </div>

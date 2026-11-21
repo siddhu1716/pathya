@@ -62,6 +62,7 @@ export type LiveCall = {
   expert: string;
   direction: "inbound" | "outbound";
   started: number;
+  phone?: boolean;
   lines: Line[];
 };
 
@@ -230,6 +231,12 @@ export const api = {
   fit: (day: number, who: string) => post<MealPlan>("/api/kitchen/mealplan/fit", { day, who }),
   intake: (who: string) => post<{ job: string }>(`/api/health/intake/${who}${via()}`),
   forwarding: () => request<Forwarding>("/api/setup/forwarding"),
+  setPhone: (k: string, phone: string) =>
+    request<Member>(`/api/family/${k}/phone`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ phone }) }),
+  verifyPhone: (k: string) => post<{ code: string; phone_hint: string }>(`/api/family/${k}/verify`),
+  report: (k: string) => request<{ text: string; wa: string; safety: string }>(`/api/family/${k}/report`),
+  hangup: (id: string) => post<{ ok: boolean }>(`/api/calls/${id}/hangup`),
+  decline: (id: string) => post<{ ok: boolean }>(`/api/calls/${id}/decline`),
   bookRequest: (b: { patient: string; hospital: string; doctor: string; area: string; reason: string; from_date: string; to_date: string; part: string }) =>
     post<{ card: string }>("/api/health/request", b),
 };
@@ -260,6 +267,7 @@ export type Member = Partial<ProfileIn> & {
   key: string; name: string; relation: string; added: boolean; has_phone: boolean; language: string; goal: string;
   conditions: string[]; targets: Targets; today: Today; meds: Med[]; doses: Dose[]; reminders: boolean; daily_hour: number | null;
   elder: boolean; body: BodyReport; checkups: Checkup[]; watch: string[]; health: Health; goal_progress: GoalProgress | null;
+  phone_hint: string | null; verified: boolean | null;
   activity: { steps: number; active_kcal: number; source: string } | null;
 };
 export type HealthPart = { part: "food" | "medicines" | "movement" | "checkins"; weight: number; percent: number; detail: string; tips: string[] };

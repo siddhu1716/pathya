@@ -124,7 +124,7 @@ def state(request: Request):
     st = _st(request)
     store, hh = st.store, st.household
     waiting = sorted(store.cards("waiting"), key=lambda c: c["card"]["kind"] != "alert")   # urgent cards on top
-    called = {f["key"][5:] for f in store.facts(prefix="call:")}
+    called = {f["key"][5:] for f in store.facts(prefix="call:")} | {f["key"][9:] for f in store.facts(prefix="declined:")}
     ringing = [j for j in store.recent_jobs(time.time() - RINGING_WINDOW)
                if isinstance(j.get("result"), dict) and j["result"].get("call_sid") == "browser"
                and j["id"] not in called]
@@ -461,12 +461,81 @@ def _family_view(st, m):
         base = P.targets({**m, "activity": "sedentary"})
         goal = {**goal, "kcal": round(base["kcal"] + act["active_kcal"]),
                 "source": goal["source"] + f" Today: sedentary base + {act['active_kcal']:.0f} active kcal from {act['source']}."}
+    phone = m.get("phone") or ""
+    verified = twilio_verified(st)
     return {**{k: v for k, v in m.items() if k != "phone"},              # numbers stay on the server
+            "phone_hint": f"…{_digits(phone)[-4:]}" if phone else None,
+            "verified": None if verified is None or not phone else _digits(phone) in verified,
             "today": pantry.today(st.store, st.household, m["key"], goal=goal), "activity": act,
             "meds": M.listed(st.store, m["key"]), "doses": M.today(st.store, m["key"]),
             "reminders": M.reminders_on(st.store, m["key"]), "daily_hour": home.daily_hour(m["key"]) if home else None,
             "checkups": checkups.for_member(m), "watch": checkups.watch(st.store, m),
             "health": health_score.score(st.store, m, home.daily_hour(m["key"]) if home else None)}
+
+
+def twilio_verified(st, ttl=60):
+    """Numbers a Twilio trial account may call (its verified caller IDs), cached for a minute. None without Twilio."""
+    if getattr(st, "twilio", None) is None:
+        return None
+    cache = getattr(st, "_verified", None)
+    if cache and time.time() - cache[0] < ttl:
+        return cache[1]
+    try:
+        nums = {_digits(c.phone_number) for c in st.twilio.outgoing_caller_ids.list(limit=50)}
+    except Exception:
+        return None
+    st._verified = (time.time(), nums)
+    return nums
+
+
+class PhoneIn(BaseModel):
+    phone: str
+
+
+@api.put("/family/{key}/phone")
+def family_phone(key: str, body: PhoneIn, request: Request):
+    """Add or change a phone number: written into household.yaml (only numbers there are ever called, rule 8)."""
+    from app.core.household import set_phone
+    st = _st(request)
+    m = _member(request, key)
+    path = getattr(st, "household_path", None)
+    if not path:
+        raise HTTPException(503, "household.yaml is not available to edit.")
+    try:
+        number = set_phone(path, st.household, key, body.phone, m["name"], m.get("relation") or "")
+    except ValueError as err:
+        raise HTTPException(400, str(err))
+    st._verified = None
+    st.store.log("family", key, f"phone for {m['name']} set to …{number[-4:]} in household.yaml")
+    if "home" in st.experts:
+        st.experts["home"].default_daily()
+    return _family_view(st, _member(request, key))
+
+
+@api.post("/family/{key}/verify")
+def family_verify(key: str, request: Request):
+    """Twilio trial accounts only call verified numbers: Twilio rings the number and asks for this code."""
+    st = _st(request)
+    m = _member(request, key)
+    if st.twilio is None:
+        raise HTTPException(503, "Phone calls are not configured.")
+    if not m.get("phone"):
+        raise HTTPException(400, "Add a phone number first.")
+    try:
+        v = st.twilio.validation_requests.create(phone_number=m["phone"], friendly_name=f"Pathya {m['name']}")
+    except Exception as err:
+        raise HTTPException(502, f"Twilio could not start the check: {err}")
+    st._verified = None
+    return {"code": v.validation_code, "phone_hint": f"…{_digits(m['phone'])[-4:]}"}
+
+
+@api.get("/family/{key}/report")
+def family_report(key: str, request: Request):
+    from app.experts.family import report
+    st = _st(request)
+    m = _member(request, key)
+    home = st.experts.get("home")
+    return report.text(st.store, st.household, m, home.daily_hour(key) if home else None)
 
 
 def activity_today(store, key):
@@ -886,6 +955,7 @@ def _go_live(st, call, lines):
     job = call.job
     st.live[job["id"]] = {"who": _who(st.household, job["person"]), "kind": job["kind"], "expert": call.expert.title,
                           "direction": job["payload"].get("direction", "outbound"), "started": call.started,
+                          "phone": (job.get("result") or {}).get("call_sid") not in (None, "browser"),
                           "lines": lines}
 
 
@@ -941,6 +1011,37 @@ def _finish_call(st, call, jid, transcript, source):
     t.add_done_callback(st.tasks.discard)
     st.calls.pop(jid, None)
     st.live.pop(jid, None)
+
+
+@api.post("/calls/{jid}/hangup")
+async def call_hangup(jid: str, request: Request):
+    """The red button for a phone call shown live in the app: Twilio by REST, Exotel by closing its stream."""
+    st = _st(request)
+    job = st.store.job(jid)
+    if not job or jid not in st.live:
+        raise HTTPException(409, "That call is not live.")
+    sid = (job.get("result") or {}).get("call_sid")
+    closer = st.hangups.get(jid)
+    if closer:
+        await closer()
+    elif st.twilio is not None and sid and sid != "browser":
+        from app.core.caller import hang_up
+        await asyncio.to_thread(hang_up, st.twilio, sid)
+    else:
+        raise HTTPException(409, "Browser calls end on their own call screen.")
+    st.store.log("caller", jid, "hung up from the app")
+    return {"ok": True}
+
+
+@api.post("/calls/{jid}/decline")
+def call_decline(jid: str, request: Request):
+    """Decline a call ringing in the app: it stops ringing (it does not count as answered)."""
+    st = _st(request)
+    if not st.store.job(jid):
+        raise HTTPException(404, "No such call.")
+    st.store.remember("app", f"declined:{jid}", True, "app")
+    st.store.log("caller", jid, "declined in the app")
+    return {"ok": True}
 
 
 @api.post("/calls/{jid}/end")
@@ -1112,14 +1213,17 @@ def build_app(lifespan=None) -> FastAPI:
             st.store.log("caller", "exotel", "refused an Exotel stream without the right credentials")
             return
         await ws.accept()
+        st.store.log("caller", "exotel", "Exotel stream connected")
         jid, lines = {}, []
 
         def call_for_start(msg):
             info = Exotel().start(msg)
+            st.store.log("caller", "exotel", f"Exotel call from …{_digits(info['from'])[-4:]}")
             job_id = _answer_incoming(st, info["from"], info["call"])
             call = _phone_call_for_start(st, {"event": "start", "start": {"callSid": info["call"],
                                                                          "customParameters": {"job_id": job_id}}}, lines)
             jid["id"] = job_id
+            st.hangups[job_id] = ws.close                       # the app's red button
             return call
 
         async def finish(call, transcript):
@@ -1135,6 +1239,7 @@ def build_app(lifespan=None) -> FastAPI:
         except Exception as err:
             st.store.log("caller", jid.get("id", "exotel"), f"Exotel stream failed: {err}")
         finally:
+            st.hangups.pop(jid.get("id"), None)
             try:
                 await ws.close()
             except Exception:
@@ -1190,6 +1295,8 @@ def build_app(lifespan=None) -> FastAPI:
     app.state.calls = {}
     app.state.live = {}
     app.state.twilio = None
+    app.state.hangups = {}
+    app.state.household_path = None
     return app
 
 
@@ -1250,6 +1357,7 @@ async def lifespan(app: FastAPI):
         register(HomeExpert(store, hh, REGISTRY["kitchen"]))
         REGISTRY["home"].default_daily()                    # parents: evening check-in on unless switched off
         app.state.store, app.state.household, app.state.experts = store, hh, REGISTRY
+        app.state.household_path = os.getenv("HOUSEHOLD", str(ROOT / "household.yaml"))
         if twilio_ready():
             from twilio.rest import Client
             app.state.twilio = Client(os.environ["TWILIO_ACCOUNT_SID"], os.environ["TWILIO_AUTH_TOKEN"])

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Activity, ArrowUp, Camera, ChevronDown, ChevronLeft, HeartPulse, Loader2, PhoneOutgoing, Plus, Stethoscope, Trash2, X } from "lucide-react";
+import { Activity, ArrowUp, Camera, ChevronDown, ChevronLeft, HeartPulse, Loader2, Phone, PhoneOutgoing, Plus, Share2, Stethoscope, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } from "@/components/ui/drawer";
 import { Dot, Meter, Panel, Pill, Ring, Row, Section } from "@/components/kit";
@@ -37,9 +37,54 @@ export function doseTone(doses: Dose[]): "ok" | "warn" | "bad" | null {
   return "ok";
 }
 
+const useReport = (k: string) => useQuery({ queryKey: ["report", k], queryFn: () => api.report(k), staleTime: 30000 });
+
+/** WhatsApp (or the phone's share sheet): the report text is fetched ahead, so the tap opens it at once. */
+function share(r: { text: string; wa: string } | undefined) {
+  if (!r) return;
+  if (navigator.share) navigator.share({ text: r.text }).catch(() => window.open(r.wa, "_blank", "noopener"));
+  else window.open(r.wa, "_blank", "noopener");
+}
+
+function PhoneRow({ m }: { m: Member }) {
+  const refresh = useRefresh();
+  const [edit, setEdit] = useState(false);
+  const [num, setNum] = useState("");
+  const [code, setCode] = useState<string | null>(null);
+  const fail = (e: Error) => toast.error(e.message);
+  const save = useMutation({ mutationFn: () => api.setPhone(m.key, num),
+    onSuccess: () => { toast.success("Saved to household.yaml"); setEdit(false); setNum(""); refresh(); }, onError: fail });
+  const verify = useMutation({ mutationFn: () => api.verifyPhone(m.key), onSuccess: (v) => setCode(v.code), onError: fail });
+  const sub = !m.has_phone ? `So Pathya can call ${who(m)}` : m.verified === false ? "Twilio trial: verify it once before calls work" : "Pathya can call this number";
+  return (
+    <>
+      <Row icon={Phone} title={m.phone_hint ? `Phone ${m.phone_hint}` : "Add a phone number"} sub={sub} onClick={() => setEdit(!edit)}
+           right={m.verified === false ? <span className="font-mono text-[11px] uppercase tracking-wider text-warning">verify</span> : undefined} />
+      {edit && (
+        <form className="px-4 pb-4 space-y-2" onSubmit={(e) => { e.preventDefault(); if (num.trim()) save.mutate(); }}>
+          <input className={field} value={num} onChange={(e) => setNum(e.target.value)} inputMode="tel" autoFocus
+                 placeholder={m.phone_hint ? `New number (now ${m.phone_hint})` : "+91 98480 22338"} />
+          <Button type="submit" className="w-full h-11" disabled={save.isPending || !num.trim()}>Save number</Button>
+          <p className="text-[12px] text-muted-foreground">Saved into household.yaml: only numbers there are ever called. Jio numbers can't take Twilio's calls.</p>
+        </form>
+      )}
+      {m.verified === false && (
+        <div className="px-4 pb-4 space-y-2">
+          {code ? (
+            <p className="text-[14px]">Twilio is calling {m.phone_hint}. On the keypad enter <span className="font-mono text-[18px]">{code}</span></p>
+          ) : (
+            <Button variant="outline" className="w-full h-10" disabled={verify.isPending} onClick={() => verify.mutate()}>Verify for calls (Twilio rings once)</Button>
+          )}
+        </div>
+      )}
+    </>
+  );
+}
+
 /** What the health score is made of, and what would raise it. */
 function HealthSheet({ m, open, onClose }: { m: Member; open: boolean; onClose: () => void }) {
   const h = m.health;
+  const { data: report } = useReport(m.key);
   return (
     <Drawer open={open} onOpenChange={(o) => !o && onClose()}>
       <DrawerContent className="bg-card border-t max-h-[90dvh]">
@@ -71,6 +116,7 @@ function HealthSheet({ m, open, onClose }: { m: Member; open: boolean; onClose: 
           {h.missing.map((k) => (
             <p key={k} className="text-[13px] text-muted-foreground"><span className="text-foreground/80">{PART[k]}:</span> {MISSING[k]}</p>
           ))}
+          <Button className="w-full h-12" disabled={!report} onClick={() => share(report)}><Share2 /> Share the report on WhatsApp</Button>
         </div>
       </DrawerContent>
     </Drawer>
@@ -411,6 +457,7 @@ function MemberPage({ m, fam, onBack }: { m: Member; fam: Family; onBack: () => 
   const [watchHelp, setWatchHelp] = useState(false);
   const [score, setScore] = useState(false);
   const [editing, setEditing] = useState(false);
+  const { data: report } = useReport(m.key);
   return (
     <>
       <button onClick={onBack} className="flex items-center gap-1 text-[14px] text-muted-foreground -ml-1"><ChevronLeft className="w-4 h-4" /> Family</button>
@@ -427,16 +474,16 @@ function MemberPage({ m, fam, onBack }: { m: Member; fam: Family; onBack: () => 
           <p className="text-[13px] pt-0.5">{fam.goals[m.goal] ?? m.goal} · <button className="underline underline-offset-4 text-muted-foreground" onClick={() => setScore(true)}>{m.health.label}</button></p>
         </div>
       </div>
-      <div className="grid grid-cols-3 gap-2">
+      <div className="grid grid-cols-4 gap-2">
         <Chip icon={PhoneOutgoing} label={m.key === "me" ? "Call me" : `Call ${m.name}`} onClick={() => call.mutate()} disabled={!m.has_phone || call.isPending} />
         <Chip icon={Camera} label="Scan" onClick={() => setScanning(true)} />
         <Chip icon={HeartPulse} label={m.daily_hour == null ? "Daily call off" : `Daily ${m.daily_hour}:00`} on={m.daily_hour != null}
               onClick={() => daily.mutate()} disabled={!m.has_phone || daily.isPending} />
+        <Chip icon={Share2} label="WhatsApp report" onClick={() => share(report)} disabled={!report} />
       </div>
       <p className="text-[12px] text-muted-foreground px-1 -mt-3">
         One call covers meals, medicines, groceries, how {who(m)} {m.key === "me" ? "feel" : "feels"} and questions for the doctor.
       </p>
-      {!m.has_phone && <p className="text-[12px] text-muted-foreground px-1">No phone in household.yaml, so Pathya can't call {m.name}. Everything else works.</p>}
       {m.watch.length > 0 && (
         <Panel className="p-4 space-y-1 border-warning/40">
           <p className="label text-warning">For the family</p>
@@ -449,6 +496,7 @@ function MemberPage({ m, fam, onBack }: { m: Member; fam: Family; onBack: () => 
       <Section label="Medicines"><MedsPanel m={m} /></Section>
       {m.checkups.length > 0 && <Section label={`Checkups at ${m.age}`}><Checkups m={m} /></Section>}
       <Panel className="divide-y overflow-hidden">
+        <PhoneRow m={m} />
         <Row icon={Activity} title={m.activity ? `${m.activity.steps.toLocaleString("en-IN")} steps · ${Math.round(m.activity.active_kcal)} active kcal` : "Connect a watch"}
              sub={m.activity ? `Today, from ${m.activity.source}` : "Apple Watch through an iPhone Shortcut"} onClick={() => setWatchHelp(true)} />
         <Row icon={ChevronDown} title="Profile and goal" sub="Age, body, health notes, nutritionist targets" onClick={() => setEditing(!editing)}
