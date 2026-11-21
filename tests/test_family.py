@@ -183,7 +183,7 @@ def test_plate_guard_flags_from_the_members_own_notes_only():
     assert "Amma: less sugar; doctor: sugar" in run.input
     assert guard.warnings(flags)[0].endswith("You decide before approving.")
     plan = HomeExpert(store, HH).call_plan(store.job(HomeExpert(store, HH).call("amma")))
-    assert "Their own notes: less sugar, doctor: sugar" in plan.instructions and "never as your own opinion" in plan.instructions
+    assert "Their own notes: less sugar, doctor: sugar" in plan.instructions and "BEFORE adding it" in plan.instructions and "never as your own" in plan.instructions
 
 
 def test_portions_plus_minus_and_fit_to_target():
@@ -191,7 +191,7 @@ def test_portions_plus_minus_and_fit_to_target():
         {"slot": "lunch", "dish": "Rice, dal", "parts": [
             {"food": "Rice", "unit": "cup", "kcal": 200, "protein_g": 4, "carbs_g": 45, "fat_g": 0, "fibre_g": 1, "sugar_g": 0},
             {"food": "Dal", "unit": "katori", "kcal": 150, "protein_g": 9, "carbs_g": 20, "fat_g": 3, "fibre_g": 4, "sugar_g": 0}],
-         "portions": [{"who": "Nanna", "qty": [1, 1]}, {"who": "Shiva", "qty": [2, 2]}]}]}], "ingredients": [], "notes": ""}
+         "portions": [{"who": "Nanna (father, 62)", "qty": [1, 1]}, {"who": "Shiva", "qty": [2, 2]}]}]}], "ingredients": [], "notes": ""}
     pl.fill(plan)
     nanna = plan["days"][0]["people"][0]
     assert nanna["kcal"] == 350 and nanna["protein_g"] == 13 and plan["days"][0]["kcal"] == 525    # average plate

@@ -218,7 +218,28 @@ export const api = {
   reminders: (k: string, on: boolean) => post<{ ok: boolean }>(`/api/family/${k}/reminders`, { on }),
   callMember: (k: string) => post<{ job: string }>(`/api/family/${k}/call${via()}`),
   dailyMember: (k: string, hour: number | null) => post<{ ok: boolean }>(`/api/family/${k}/daily`, { hour }),
+  dose: (k: string, slot: string, taken = "yes", words = "") => post<Member>(`/api/family/${k}/dose`, { slot, taken, words }),
+  scan: (who: string, photo: File) => {
+    const form = new FormData();
+    form.append("who", who);
+    form.append("photo", photo);
+    return request<ScanResult>("/api/scan", { method: "POST", body: form });
+  },
+  portion: (day: number, meal: number, part: number, who: string, qty: number) =>
+    post<MealPlan>("/api/kitchen/mealplan/portion", { day, meal, part, who, qty }),
+  fit: (day: number, who: string) => post<MealPlan>("/api/kitchen/mealplan/fit", { day, who }),
 };
+
+export type BodyReport = { date?: string | null; weight_kg?: number | null; height_cm?: number | null; body_fat_pct?: number | null;
+  skeletal_muscle_kg?: number | null; fat_mass_kg?: number | null; bmr_kcal?: number | null; visceral_fat_level?: number | null };
+export type ScanResult =
+  | { kind: "meal"; note: string; entry: MealEntry }
+  | { kind: "medicine"; note: string; medicines: { name_as_printed: string; strength: string | null; form: string | null; unclear: boolean }[];
+      matches: string[]; due: Dose[] }
+  | { kind: "prescription"; note: string; card: string }
+  | { kind: "body_report"; note: string; report: BodyReport }
+  | { kind: "other"; note: string };
+export type Checkup = { what: string; why: string; source: string };
 
 export type Targets = Macros & { sugar_g: number; salt_g: number; source: string };
 export type Dose = { slot: string; hour: number; meds: string[]; taken: "yes" | "no" | "not_sure" | null; words: string | null };
@@ -226,11 +247,13 @@ export type Med = { name_as_written: string; dose?: string | null; strength?: st
   days?: number | null; morning?: boolean; afternoon?: boolean; night?: boolean; source?: string };
 export type ProfileIn = {
   relation: string; age: number | null; sex: string; height_cm: number | null; weight_kg: number | null; activity: string;
-  food: string; allergies: string; conditions: string[]; goal: string; override: Partial<Macros>;
+  food: string; allergies: string; conditions: string[]; goal: string; override: Partial<Macros>; body: BodyReport;
 };
 export type Member = Partial<ProfileIn> & {
   key: string; name: string; relation: string; added: boolean; has_phone: boolean; language: string; goal: string;
   conditions: string[]; targets: Targets; today: Today; meds: Med[]; doses: Dose[]; reminders: boolean; daily_hour: number | null;
+  elder: boolean; body: BodyReport; checkups: Checkup[]; watch: string[];
+  activity: { steps: number; active_kcal: number; source: string } | null;
 };
 export type BoardRow = { key: string; name: string; points: number; rank: number; streak: number; breakdown: Record<string, number> };
 export type Family = { members: Member[]; board: { week_of: string; rows: BoardRow[]; rules: string[] };
@@ -245,13 +268,15 @@ export type Today = { meals: MealEntry[]; total: Macros & { sugar_g?: number }; 
 
 export type Usual = { name: string; count: number; typical: number; days_ago: number; store: string; price?: number };
 export type MealPlan = {
-  days: { day: string; meals: { slot: string; dish: string }[]; kcal: number; protein_g: number; carbs_g: number; fat_g: number; fibre_g: number;
+  days: { day: string; meals: PlanMeal[]; kcal: number; protein_g: number; carbs_g: number; fat_g: number; fibre_g: number;
     people?: { who: string; plate: string; kcal: number; protein_g: number; fibre_g: number; sugar_g: number }[] }[];
   ingredients: { item: string; quantity: string; have_it: boolean }[];
   notes: string;
   made?: number;
   for_days?: number;
 };
+export type PlanPart = { food: string; unit: string; kcal: number; protein_g: number; carbs_g: number; fat_g: number; fibre_g: number; sugar_g: number };
+export type PlanMeal = { slot: string; dish: string; parts?: PlanPart[]; portions?: { who: string; qty: number[] }[] };
 export type Macros = { kcal: number; protein_g: number; carbs_g: number; fat_g: number; fibre_g: number };
 export type Nutrition = {
   days: number; people: number; orders: number; dry_runs: number; per_person_day: Macros;

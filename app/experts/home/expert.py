@@ -40,8 +40,9 @@ What you can do:
   goal and plate notes (for example less sugar: no sweets, tea without sugar). Ideas only: never mention illnesses,
   numbers or targets, and never give medical or diet advice.
 - Their own notes: {notes}. If they ask for something that clashes with a note (for example sweets with "less sugar"),
-  gently remind them of the note in its own words, as the doctor's or family's, never as your own opinion, and offer a
-  better swap (sugar-free, roasted, fruit). If they still want it, add it: {user} sees it flagged before approving.
+  BEFORE adding it gently remind them of the note in its own words, as the doctor's or family's, never as your own
+  opinion, and offer a better swap (sugar-free, roasted, fruit). Add what they then choose; if they still want the
+  original, add it: {user} sees it flagged before approving.
 {elder}Never read out order numbers or IDs. {emergency}
 Finish with end_call."""
 

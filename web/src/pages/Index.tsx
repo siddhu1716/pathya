@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { History, Home, Loader2, Package, Users, UtensilsCrossed } from "lucide-react";
+import { Camera, History, Home, Loader2, Package, Users, UtensilsCrossed } from "lucide-react";
+import { ScanSheet } from "@/components/Scan";
 import { Button } from "@/components/ui/button";
 import { ApprovalCard } from "@/components/ApprovalCard";
 import { CallHistory } from "@/components/CallHistory";
@@ -72,6 +73,7 @@ function Connect({ error }: { error: string }) {
 
 const Index = () => {
   const [tab, setTab] = useState<Tab>("home");
+  const [scanning, setScanning] = useState(false);
   const { data: s, error } = useQuery({ queryKey: ["state"], queryFn: api.state, refetchInterval: 2000 });
 
   if (!s) {
@@ -94,10 +96,15 @@ const Index = () => {
           <div className="flex items-center gap-2">
             {s.live.length > 0 && <Pill tone="ok"><Dot tone="ok" pulse /> On a call</Pill>}
             {s.dry_run ? <Pill tone="warn">Dry run</Pill> : <Pill tone="ok">Live orders</Pill>}
+            <button aria-label="Scan a photo" onClick={() => setScanning(true)}
+                    className="w-9 h-9 rounded-full border flex items-center justify-center active:bg-white/5">
+              <Camera className="w-4 h-4" />
+            </button>
           </div>
         </div>
       </header>
 
+      <ScanSheet open={scanning} onClose={() => setScanning(false)} />
       <main className="max-w-xl mx-auto px-4 pt-5 pb-28 space-y-7">
         {s.live.map((c) => <LiveCallBanner key={c.id} call={c} />)}
 

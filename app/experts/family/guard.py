@@ -51,4 +51,8 @@ async def check(items, members, runner=None):
 
 
 def warnings(flags):
-    return [f"{f['item']}: clashes with {f['who']}'s note \"{f['note']}\". You decide before approving." for f in flags]
+    grouped = {}
+    for f in flags:
+        grouped.setdefault((f["item"], f["who"]), []).append(f"\"{f['note']}\"")
+    return [f"{item}: clashes with {who}'s note{'s' if len(n) > 1 else ''} {', '.join(dict.fromkeys(n))}. "
+            "You decide before approving." for (item, who), n in grouped.items()]

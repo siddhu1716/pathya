@@ -7,7 +7,7 @@ import { ApprovalCard } from "@/components/ApprovalCard";
 import { useFamily } from "@/components/FamilyTab";
 import { AtHome } from "@/components/HomeStock";
 import { Panel, Pill, Section } from "@/components/kit";
-import { api, AppState, Macros, Nutrition } from "@/lib/api";
+import { api, AppState, Macros, MealPlan, Nutrition } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 function Usuals({ state }: { state: AppState }) {
@@ -102,11 +102,12 @@ function Plan({ state }: { state: AppState }) {
         <input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Anything to keep in mind? (less oil, someone fasting on Monday)"
                className="w-full rounded-xl border bg-white/[0.03] px-3 py-2.5 text-[15px] outline-none focus:border-white/30" />
         <Button className="w-full h-12" disabled={make.isPending || eaters.length + guests === 0} onClick={() => make.mutate()}>
-          {make.isPending ? <><Loader2 className="animate-spin" /> Planning (about 15 s)</> : plan ? <><RefreshCw /> New plan</> : "Plan meals"}
+          {make.isPending ? <><Loader2 className="animate-spin" /> Planning (about 30 s)</> : plan ? <><RefreshCw /> New plan</> : "Plan meals"}
         </Button>
       </Panel>
       {card && <ApprovalCard row={card} />}
-      {plan && !card && (
+      {plan && plan.days.some((d) => d.meals.some((m) => m.parts?.length)) && <PlanView plan={plan} />}
+      {plan && !card && !plan.days.some((d) => d.meals.some((m) => m.parts?.length)) && (
         <Panel className="divide-y">
           {plan.days.map((d) => (
             <div key={d.day} className="px-4 py-3 space-y-1">
@@ -119,6 +120,93 @@ function Plan({ state }: { state: AppState }) {
           ))}
         </Panel>
       )}
+    </div>
+  );
+}
+
+/** One person's plate, food by food, with +/- (the plan and the cook's call use these quantities). */
+function PlanView({ plan }: { plan: MealPlan }) {
+  const qc = useQueryClient();
+  const { data: fam } = useFamily();
+  const [d, setD] = useState(0);
+  const day = plan.days[Math.min(d, plan.days.length - 1)];
+  const people = day.people ?? [];
+  const [pick, setPick] = useState<string | null>(null);
+  const who = people.find((p) => p.who === pick)?.who ?? people[0]?.who;
+  const save = (p: MealPlan) => qc.setQueryData(["kitchen"], (old: object | undefined) => (old ? { ...old, plan: { ...plan, ...p } } : old));
+  const fail = (e: Error) => toast.error(e.message);
+  const portion = useMutation({ mutationFn: (a: { m: number; part: number; qty: number }) => api.portion(d, a.m, a.part, who!, a.qty), onSuccess: save, onError: fail });
+  const fit = useMutation({ mutationFn: () => api.fit(d, who!), onSuccess: (p) => { save(p); toast.success(`Fitted to ${who}'s target`); }, onError: fail });
+  if (!who) return null;
+  const totals = people.find((p) => p.who === who)!;
+  const member = fam?.members.find((m) => m.name === who);
+  const t = member?.targets;
+  return (
+    <Panel className="overflow-hidden">
+      {plan.days.length > 1 && (
+        <div className="flex gap-2 px-4 pt-4 overflow-x-auto">
+          {plan.days.map((x, i) => (
+            <button key={i} onClick={() => setD(i)} className={cn("px-3 h-8 rounded-full border text-[13px] shrink-0", i === d ? "bg-primary text-primary-foreground border-primary" : "text-muted-foreground")}>{x.day}</button>
+          ))}
+        </div>
+      )}
+      <div className="flex gap-2 px-4 pt-3 overflow-x-auto">
+        {people.map((p) => (
+          <button key={p.who} onClick={() => setPick(p.who)} className={cn("px-3 h-8 rounded-full border text-[13px] shrink-0", p.who === who ? "bg-white/10 border-white/30" : "text-muted-foreground")}>{p.who}</button>
+        ))}
+      </div>
+      <div className="px-4 py-3 space-y-2 border-b">
+        {t ? (
+          <>
+            <MiniBar label="Energy" v={totals.kcal} goal={t.kcal} unit="kcal" />
+            <MiniBar label="Protein" v={totals.protein_g} goal={t.protein_g} unit="g" />
+          </>
+        ) : <p className="font-mono text-[12px] text-muted-foreground">{totals.kcal} kcal · protein {totals.protein_g} g</p>}
+        {totals.plate && <p className="text-[13px] text-muted-foreground">{totals.plate}</p>}
+      </div>
+      <div className="divide-y">
+        {day.meals.map((meal, mi) => {
+          const qty = meal.portions?.find((p) => p.who === who)?.qty ?? [];
+          return (
+            <div key={mi} className="px-4 py-3 space-y-2">
+              <p className="text-[14px]"><span className="label mr-2">{meal.slot}</span>{meal.dish}</p>
+              {(meal.parts ?? []).map((part, pi) => {
+                const q = qty[pi] ?? 0;
+                return (
+                  <div key={pi} className="flex items-center gap-2">
+                    <span className={cn("flex-1 min-w-0 text-[14px] truncate", !q && "text-muted-foreground line-through")}>{part.food}</span>
+                    <span className="font-mono text-[11px] text-muted-foreground w-14 text-right">{Math.round(part.kcal * q)} kcal</span>
+                    <span className="flex items-center rounded-full border h-8">
+                      <button aria-label={`Less ${part.food}`} className="w-8 h-8 text-muted-foreground" disabled={portion.isPending || q <= 0}
+                              onClick={() => portion.mutate({ m: mi, part: pi, qty: Math.max(0, q - 0.5) })}>-</button>
+                      <span className="font-mono text-[12px] tabular-nums min-w-16 text-center">{q} {part.unit}</span>
+                      <button aria-label={`More ${part.food}`} className="w-8 h-8 text-muted-foreground" disabled={portion.isPending}
+                              onClick={() => portion.mutate({ m: mi, part: pi, qty: q + 0.5 })}>+</button>
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })}
+      </div>
+      {t && (
+        <div className="p-4 border-t">
+          <Button variant="outline" className="w-full h-11" disabled={fit.isPending} onClick={() => fit.mutate()}>
+            {fit.isPending ? <Loader2 className="animate-spin" /> : null} Fit {who}'s plate to {t.kcal} kcal
+          </Button>
+        </div>
+      )}
+    </Panel>
+  );
+}
+
+function MiniBar({ label, v, goal, unit }: { label: string; v: number; goal: number; unit: string }) {
+  const pct = goal ? Math.min(100, Math.round((v / goal) * 100)) : 0;
+  return (
+    <div className="space-y-1">
+      <div className="flex justify-between text-[12px]"><span>{label}</span><span className="font-mono tabular-nums text-muted-foreground">{Math.round(v)} / {goal} {unit}</span></div>
+      <div className="h-1 rounded-full bg-white/10 overflow-hidden"><div className="h-full bg-foreground/80" style={{ width: `${pct}%` }} /></div>
     </div>
   );
 }
@@ -162,7 +250,8 @@ function NutritionPanel({ state }: { state: AppState }) {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["state"] }),
     onError: (e: Error) => toast.error(e.message),
   });
-  const n = data?.nutrition;
+  const saved = data?.nutrition;
+  const n = saved && data ? { ...saved, targets: data.targets } : saved;      // always each member's current targets
   const plan = data?.plan;
   const brief = state.cards.find((c) => c.card.kind === "brief" && c.card.expert === "kitchen");
   const planAvg = plan?.days.length

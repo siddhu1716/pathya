@@ -113,7 +113,7 @@ Family's notes: {notes}
 Plan {days} day(s) of breakfast, lunch and dinner the cook can make (simple, everyday dishes; reuse ingredients).
 For each meal give: the dish; its parts, each a food with a household unit (cup, katori, roti, dosa, idli, piece,
 glass, tbsp) and the ESTIMATED nutrition of ONE unit (sugar_g = added sugar); and portions: one entry per eater
-(who = their name exactly as above) with the quantity of every part, in the same order (halves allowed, 0 = skip),
+(who = just their name, without anything in brackets) with the quantity of every part, in the same order (halves allowed, 0 = skip),
 chosen so each person's whole day lands close to their own targets and fits their notes. In people, one entry per eater
 with a one-line plate note for the day (for example "half rice, extra dal, tea without sugar"). Guests eat the
 standard plate.
@@ -156,9 +156,16 @@ def person_day(day, who):
     return {k: round(v) for k, v in total.items()}
 
 
+def bare(who):
+    """'Shiva (me, 30)' -> 'Shiva': the planner sometimes copies the description."""
+    return re.sub(r"\s*\(.*\)\s*$", "", str(who)).strip()
+
+
 def fill(plan):
     """Totals per person per day (people[]) and the average plate (day kcal, protein_g ...) from the quantities."""
     for day in plan.get("days", []):
+        for x in [p for m in day.get("meals", []) for p in m.get("portions") or []] + list(day.get("people") or []):
+            x["who"] = bare(x["who"])
         names = list(dict.fromkeys(p["who"] for m in day.get("meals", []) for p in m.get("portions") or []))
         if not names:
             continue

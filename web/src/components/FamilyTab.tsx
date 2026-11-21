@@ -1,11 +1,12 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ArrowUp, ChevronLeft, Loader2, PhoneOutgoing, Plus, Trash2, X } from "lucide-react";
+import { Activity, ArrowUp, Camera, ChevronLeft, Loader2, PhoneOutgoing, Plus, Stethoscope, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } from "@/components/ui/drawer";
 import { Dot, Panel, Pill, Row, Section } from "@/components/kit";
-import { api, AppState, Dose, Family, Member } from "@/lib/api";
+import { ScanSheet } from "@/components/Scan";
+import { api, AppState, Dose, Family, key as appKey, Member, server } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 const field = "w-full rounded-xl border bg-white/[0.03] px-3 py-2.5 text-[15px] outline-none focus:border-white/30";
@@ -87,6 +88,8 @@ function MemberRow({ m, onPick }: { m: Member; onPick: () => void }) {
         <span className="flex items-center gap-2">
           <span className="text-[15px] truncate">{m.name}</span>
           {tone && <Dot tone={tone} />}
+          {m.elder && <span className="font-mono text-[10px] text-muted-foreground">{m.age}</span>}
+          {m.watch.length > 0 && <Dot tone="warn" />}
         </span>
         <span className="flex gap-1.5">
           <span className="h-1 flex-1 rounded-full bg-white/10 overflow-hidden">
@@ -183,6 +186,7 @@ function MedsPanel({ m }: { m: Member }) {
   });
   const remove = useMutation({ mutationFn: (i: number) => api.removeMed(m.key, i), onSuccess: refresh, onError: fail });
   const remind = useMutation({ mutationFn: (on: boolean) => api.reminders(m.key, on), onSuccess: refresh, onError: fail });
+  const mark = useMutation({ mutationFn: (slot: string) => api.dose(m.key, slot, "yes"), onSuccess: refresh, onError: fail });
   const toggle = (s: string) => setMed({ ...med, times: med.times.includes(s) ? med.times.filter((x) => x !== s) : [...med.times, s] });
   return (
     <div className="space-y-3">
@@ -196,6 +200,10 @@ function MedsPanel({ m }: { m: Member }) {
               </div>
               <p className="text-[14px]">{d.meds.join(", ")}</p>
               {d.words && <p className="text-[13px] text-muted-foreground">"{d.words}"</p>}
+              {d.taken !== "yes" && (
+                <button className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground pt-1" disabled={mark.isPending}
+                        onClick={() => mark.mutate(d.slot)}>Mark taken</button>
+              )}
             </div>
           ))}
         </Panel>
@@ -289,6 +297,11 @@ function ProfilePanel({ m, fam, onRemoved }: { m: Member; fam: Family; onRemoved
       <input className={field} value={p.allergies} onChange={set("allergies")} placeholder="Allergies (never on their plate)" />
       <input className={field} value={p.conditions} onChange={set("conditions")} placeholder="What the doctor said (sugar, BP ...)" />
       <p className="text-[12px] text-muted-foreground">Used only to choose dishes and portions. QuickPick never diagnoses.</p>
+      {m.body && Object.keys(m.body).length > 0 && (
+        <p className="text-[12px] font-mono text-muted-foreground">
+          Body report{m.body.date ? ` ${m.body.date}` : ""}: {[m.body.body_fat_pct && `fat ${m.body.body_fat_pct}%`, m.body.skeletal_muscle_kg && `muscle ${m.body.skeletal_muscle_kg} kg`, m.body.bmr_kcal && `BMR ${m.body.bmr_kcal}`].filter(Boolean).join(" · ")}
+        </p>
+      )}
       <div className="grid grid-cols-2 gap-2">
         <input className={field} inputMode="numeric" value={p.kcal} onChange={set("kcal")} placeholder="Nutritionist kcal" />
         <input className={field} inputMode="numeric" value={p.protein_g} onChange={set("protein_g")} placeholder="Nutritionist protein g" />
@@ -305,12 +318,57 @@ function ProfilePanel({ m, fam, onRemoved }: { m: Member; fam: Family; onRemoved
   );
 }
 
+function Checkups({ m }: { m: Member }) {
+  return (
+    <Panel className="divide-y">
+      {m.checkups.map((c) => (
+        <div key={c.what} className="px-4 py-3 flex gap-3">
+          <Stethoscope className="w-4 h-4 mt-0.5 shrink-0 text-muted-foreground" />
+          <div>
+            <p className="text-[15px]">{c.what}</p>
+            <p className="text-[13px] text-muted-foreground">{c.why} <span className="font-mono text-[11px]">({c.source})</span></p>
+          </div>
+        </div>
+      ))}
+      <p className="px-4 py-3 text-[12px] text-muted-foreground">
+        What people {m.age}+ are usually offered. Ask the doctor which apply to {m.key === "me" ? "you" : m.name}. QuickPick never diagnoses.
+      </p>
+    </Panel>
+  );
+}
+
+function WatchHelp({ open, onClose, m }: { open: boolean; onClose: () => void; m: Member }) {
+  const url = `${server() || window.location.origin}/api/activity/${m.key}`;
+  return (
+    <Drawer open={open} onOpenChange={(o) => !o && onClose()}>
+      <DrawerContent className="bg-card border-t">
+        <div className="p-4 pb-8 space-y-3">
+          <DrawerHeader className="px-0 text-left">
+            <DrawerTitle className="font-medium">Connect an Apple Watch</DrawerTitle>
+            <DrawerDescription>Apple Health has no web access, so an iPhone Shortcut sends today's numbers. Run it as a daily automation.</DrawerDescription>
+          </DrawerHeader>
+          <ol className="text-[14px] space-y-1.5 list-decimal pl-5">
+            <li>Shortcuts → New → <b>Find Health Samples</b>: Steps, today, sum. Again for Active Energy.</li>
+            <li><b>Get contents of URL</b>, method POST, JSON body: steps, active_kcal, source "Apple Watch".</li>
+            <li>Header <span className="font-mono">X-QuickPick-Key</span> with your key.</li>
+            <li>Automation → Time of day (for example 9 PM) → run this shortcut.</li>
+          </ol>
+          <p className="font-mono text-[12px] break-all rounded-xl border p-3">POST {url}<br />X-QuickPick-Key: {appKey() || "(your key)"}</p>
+          <p className="text-[12px] text-muted-foreground">With a watch, today's energy target becomes a sedentary base plus the active energy it measured. WHOOP has an official API: it can be added with a WHOOP developer app.</p>
+        </div>
+      </DrawerContent>
+    </Drawer>
+  );
+}
+
 function MemberPage({ m, fam, onBack }: { m: Member; fam: Family; onBack: () => void }) {
   const refresh = useRefresh();
   const fail = (e: Error) => toast.error(e.message);
   const call = useMutation({ mutationFn: () => api.callMember(m.key), onSuccess: () => { toast.success("Calling"); refresh(); }, onError: fail });
   const daily = useMutation({ mutationFn: () => api.dailyMember(m.key, m.daily_hour == null ? 20 : null), onSuccess: refresh, onError: fail });
   const row = fam.board.rows.find((r) => r.key === m.key);
+  const [scanning, setScanning] = useState(false);
+  const [watchHelp, setWatchHelp] = useState(false);
   return (
     <>
       <button onClick={onBack} className="flex items-center gap-1 text-[14px] text-muted-foreground -ml-1"><ChevronLeft className="w-4 h-4" /> Family</button>
@@ -323,6 +381,20 @@ function MemberPage({ m, fam, onBack }: { m: Member; fam: Family; onBack: () => 
           </p>
         </div>
       </div>
+      {m.watch.length > 0 && (
+        <Panel className="p-4 space-y-1 border-warning/40">
+          <p className="label text-warning">For the family</p>
+          {m.watch.map((w) => <p key={w} className="text-[14px]">{w}</p>)}
+          <p className="text-[12px] text-muted-foreground">From logged meals only. Talk to {m.name} or the doctor if you are worried.</p>
+        </Panel>
+      )}
+      <Panel className="divide-y overflow-hidden">
+        <Row icon={Camera} title="Scan a photo" sub="Plate, medicine strip, prescription or InBody report" onClick={() => setScanning(true)} />
+        <Row icon={Activity} title={m.activity ? `${m.activity.steps.toLocaleString("en-IN")} steps · ${Math.round(m.activity.active_kcal)} active kcal` : "Connect a watch"}
+             sub={m.activity ? `Today, from ${m.activity.source}` : "Apple Watch through an iPhone Shortcut"} onClick={() => setWatchHelp(true)} />
+      </Panel>
+      <ScanSheet open={scanning} onClose={() => setScanning(false)} who={m.key} />
+      <WatchHelp open={watchHelp} onClose={() => setWatchHelp(false)} m={m} />
       {m.has_phone && (
         <Panel className="divide-y overflow-hidden">
           <Row icon={PhoneOutgoing} title={m.key === "me" ? "Call me now" : `Call ${m.name} now`} sub="Medicines, meals, groceries, a dish idea"
@@ -333,7 +405,8 @@ function MemberPage({ m, fam, onBack }: { m: Member; fam: Family; onBack: () => 
       )}
       <Section label="Today"><TodayPanel m={m} /></Section>
       <Section label="Medicines"><MedsPanel m={m} /></Section>
-      <Section label="Profile and goal"><ProfilePanel key={m.key} m={m} fam={fam} onRemoved={onBack} /></Section>
+      {m.checkups.length > 0 && <Section label={`Checkups at ${m.age}`}><Checkups m={m} /></Section>}
+      <Section label="Profile and goal"><ProfilePanel key={`${m.key}-${m.weight_kg}-${m.height_cm}`} m={m} fam={fam} onRemoved={onBack} /></Section>
     </>
   );
 }

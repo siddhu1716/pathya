@@ -24,7 +24,7 @@ Python 3.11+, FastAPI, Jinja2 + HTMX (Pico.css), SQLite (app/core/store.py), ope
 - app/experts/base.py: the Expert contract and registry
 - app/experts/kitchen/: swiggy.py (ordering rules, tested), zepto.py, planner.py, pantry.py (at home, food log), expert.py
 - app/experts/health/: expert.py, rx.py
-- app/experts/family/: profiles.py (members, goals, targets), meds.py (as written, daily reminders), board.py (weekly leaderboard)
+- app/experts/family/: profiles.py (members, goals, targets), meds.py (as written, daily reminders), board.py (weekly leaderboard), scan.py (camera), checkups.py (age checkups, elder intake watch), guard.py (cart vs each member's own notes)
 - app/experts/home/: the Family line: check-in and medicine reminder calls for any member with a household.yaml phone; doorstep/: unknown callers
 - app/core/lang.py: call languages (Telugu default; household.yaml `language:` and per-person `language:`)
 - app/core/convo.py: every call follows the caller's language and wraps up before end_call (refused until they confirm)
@@ -42,6 +42,9 @@ Python 3.11+, FastAPI, Jinja2 + HTMX (Pico.css), SQLite (app/core/store.py), ope
 - Medicines are kept exactly as written; reminder calls only remind and record the answer in the person's words.
 - The leaderboard scores habits only (meals logged, near own targets, doses taken, calls answered), never readings or weight.
 - Members added in the app have no phone and are never called.
+- Age checkups list what public programmes offer at that age (NP-NCD, WHO ICOPE, USPSTF), with the source, as "ask the doctor"; never "you have" or "you will get".
+- The plate guard and calls only quote a member's own notes (goal, allergy, what the doctor said); the human who taps decides. No health claims of our own.
+- Camera: meals are logged; medicines, prescriptions and body reports are copied as printed and saved only after a human confirms.
 
 ## Done means
 Tests pass; you list the manual check steps; no change to the hard rules above; small, reviewable diffs.
