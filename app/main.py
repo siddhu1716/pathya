@@ -206,6 +206,78 @@ def kitchen_call(person: str, request: Request):
     return {"job": _expert(request, "kitchen").weekly_call(person)}
 
 
+class Reorder(BaseModel):
+    items: list[str]
+
+
+class PlanAsk(BaseModel):
+    days: int = 3
+    notes: str = ""
+
+
+@api.get("/kitchen/overview")
+def kitchen_overview(request: Request):
+    from app.experts.kitchen import planner as pl
+    st = _st(request)
+    fact = lambda key: next((f["value"] for f in st.store.facts("home", key)), None)
+    cook = st.experts["kitchen"].cook() if "kitchen" in st.experts else None
+    k = st.household.get("kitchen") or {}
+    return {"usuals": pl.usuals(st.store), "plan": fact("mealplan"), "nutrition": fact("nutrition"),
+            "targets": pl.targets(st.household), "nutritionist": (st.household.get("nutritionist") or {}).get("name"),
+            "cook": st.household["people"][cook]["name"] if cook else None,
+            "prefs": {"people": k.get("people", len(st.household["people"]) + 1), "diet": k.get("diet", "vegetarian"),
+                      "cuisine": k.get("cuisine", "Telugu home food")}}
+
+
+@api.post("/kitchen/reorder")
+async def kitchen_reorder(body: Reorder, request: Request):
+    kitchen = _kitchen_ready(request)
+    if not body.items:
+        raise HTTPException(400, "Pick at least one item.")
+    try:
+        card = await kitchen.handle(", ".join(body.items[:30]))
+    except Exception as err:
+        raise HTTPException(502, f"Could not build the cart: {err}")
+    return {"card": _st(request).store.add_card(card.to_dict())}
+
+
+@api.post("/kitchen/mealplan")
+async def kitchen_mealplan(body: PlanAsk, request: Request):
+    from app.experts.kitchen import planner as pl
+    st = _st(request)
+    days = max(1, min(body.days, 7))
+    try:
+        plan = await pl.meal_plan(st.household, st.store, days, body.notes)
+    except Exception as err:
+        raise HTTPException(502, f"Could not plan meals: {err}")
+    st.store.remember("home", "mealplan", {**plan, "made": time.time(), "for_days": days}, "meal planner")
+    aid = st.store.add_card(_expert(request, "kitchen").plan_card(plan, days).to_dict())
+    return {"card": aid, "plan": plan}
+
+
+@api.post("/kitchen/nutrition")
+async def kitchen_nutrition(request: Request):
+    from app.experts.kitchen import planner as pl
+    st = _st(request)
+    try:
+        nut = await pl.nutrition(st.store, st.household)
+    except Exception as err:
+        raise HTTPException(502, f"Could not estimate nutrition: {err}")
+    st.store.remember("home", "nutrition", {**nut, "made": time.time()}, "nutrition estimate")
+    return nut
+
+
+@api.post("/kitchen/nutrition/share")
+def kitchen_nutrition_share(request: Request):
+    st = _st(request)
+    fact = lambda key: next((f["value"] for f in st.store.facts("home", key)), None)
+    nut = fact("nutrition")
+    if not nut:
+        raise HTTPException(409, "Work out the nutrition picture first.")
+    card = _expert(request, "kitchen").nutrition_card(fact("mealplan"), nut)
+    return {"card": st.store.add_card(card.to_dict())}
+
+
 @api.post("/health/book")
 def health_book(body: Booking, request: Request):
     hh = _st(request).household

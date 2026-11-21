@@ -20,6 +20,18 @@ clinics:
     clinic: "Sunrise Clinic, Gachibowli (placeholder)"
     phone: "+91XXXXXXXXXX"
 address_hint: Loft
+# Kitchen preferences for meal plans (the planner never gives diet advice; the doctor's written advice is used
+# only to choose dishes). Nutrition targets are optional: set them with your nutritionist; otherwise a general
+# reference (ICMR-NIN 2020) is shown.
+kitchen:
+  people: 3
+  diet: vegetarian
+  cuisine: Telugu home food
+  budget_week: 3000
+# nutrition_targets: {kcal: 1800, protein_g: 60, fibre_g: 30, source: "set with Dr. X, Nov 2026"}
+nutritionist:
+  name: "Nutritionist (placeholder)"
+  phone: "+91XXXXXXXXXX"
 # What the Doorstep Expert tells a delivery partner who calls (never OTPs, payment or IDs).
 delivery_instructions: >-
   Equal AI office, 3rd floor, RMZ The Loft, Raidurg. Show the order at the ground-floor security desk,

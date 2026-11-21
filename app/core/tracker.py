@@ -26,12 +26,20 @@ def record(store, aid, card, result):
                   address=card.get("address"), address_id=p.get("address_id"))
     if result.get("dry_run"):
         store.add_order(f"dry-{aid}", "dry run", status="DRY RUN: not placed", **common)
+        _remember(store, card, "dry run")
         return [f"dry-{aid}"]
     ids = order_ids(result.get("order"))
     eta = result.get("eta") or {}
     for oid in ids:
         store.add_order(oid, shop, status="placed", eta=eta.get(oid), **common)
+    _remember(store, card, shop)
     return ids
+
+
+def _remember(store, card, shop):
+    """Household memory: what this home buys (planner.remember_order)."""
+    from app.experts.kitchen.planner import remember_order
+    remember_order(store, card.get("lines", []), shop)
 
 
 async def tick(store, kitchen, now=None, state=None):

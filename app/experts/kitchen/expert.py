@@ -5,6 +5,7 @@ import os
 import time
 
 from app.experts.base import CallPlan, Card, Expert
+from app.experts.kitchen import planner as pl
 from app.experts.kitchen import swiggy as sw
 from app.experts.kitchen import zepto as zp
 
@@ -31,10 +32,18 @@ def for_people(msg):
     return msg.strip()
 
 
+MENU_CALL = """You are QuickPick, an AI assistant, calling {who} for {user}'s family about tomorrow's cooking.
+Your first sentence: "{greeting}" After it, speak {lang}, simply and politely; if they answer in another language,
+continue in theirs. Tomorrow's menu: {menu}.
+Read the menu, at most three dishes at a time. Ask whether anything is missing in the kitchen to cook it.
+Call save_missing with every missing item and quantity in their words (an empty list if nothing is missing).
+Never discuss prices, payment, health or diets. Finish with end_call."""
+
+
 class KitchenExpert(Expert):
     name, title = "kitchen", "Kitchen Expert"
     handles = "groceries, milk, vegetables, kitchen supplies, the weekly list, reorders, meal-plan ingredients"
-    call_kinds = {"list"}
+    call_kinds = {"list", "menu"}
 
     def __init__(self, store, household, agent_im, ops, zepto=None):
         self.store, self.hh, self.agent_im, self.ops, self.zepto = store, household, agent_im, ops, zepto
@@ -51,8 +60,10 @@ class KitchenExpert(Expert):
         return jid
 
     def call_plan(self, job):
+        if job["kind"] == "menu":
+            return self._menu_plan(job)
         p, user = self.hh["people"][job["payload"]["person"]], self.hh["user"]["name"]
-        usual = [str(f["value"]) for f in self.store.facts(prefix="usual:")][:3]
+        usual = [f"{u['typical']} x {u['name']}" for u in pl.usuals(self.store, 3)]
         if job["payload"].get("direction") == "inbound":
             greeting = f"Namaskaram {p['name']}, I am QuickPick, an AI assistant answering for {user}. What does the kitchen need?"
         else:
@@ -75,8 +86,73 @@ class KitchenExpert(Expert):
         return plan
 
     async def after_call(self, job, saved):
+        if job["kind"] == "menu":
+            missing = saved.get("missing") or []
+            if not missing:
+                return Card(self.name, "info", "The cook has everything for tomorrow",
+                            [saved.get("summary") or "Nothing missing."], question="", choices=[{"id": "ok", "label": "OK"}])
+            return await self.handle(", ".join(missing), ref=job["id"])
         items = saved.get("items") or []
         return await self.handle(", ".join(items), ref=job["id"]) if items else None
+
+    # ---- meal plans, the cook's menu call, nutrition ----
+    def menu_call(self, person, menu, run_at=None):
+        p = self.hh["people"][person]
+        return self.store.add_job(self.name, "menu", person, {"person": person, "to": p["phone"], "menu": menu}, run_at)
+
+    def _menu_plan(self, job):
+        pay = job["payload"]
+        p, user = self.hh["people"][pay["person"]], self.hh["user"]["name"]
+        menu = "; ".join(f"{m['slot']}: {m['dish']}" for m in pay["menu"].get("meals", [])) or "not set"
+        greeting = f"Namaskaram {p['name']}, I am QuickPick, an AI assistant calling for {user} about tomorrow's menu."
+        plan = CallPlan(MENU_CALL.format(who=p["name"], user=user, greeting=greeting, lang=p.get("language", "Telugu"),
+                                         menu=menu), greeting, max_minutes=4)
+
+        def save_missing(items: list[str], notes: str) -> str:
+            """Save what is missing in the kitchen for tomorrow's menu, with quantities, in the cook's words."""
+            plan.saved.update(missing=items, notes=notes)
+            return "Saved. Read the missing items back, at most three at a time."
+
+        def end_call(summary: str) -> str:
+            """Finish the call with a one-line English summary."""
+            plan.saved["summary"] = summary
+            return "Say goodbye now."
+
+        plan.tools = [save_missing, end_call]
+        return plan
+
+    def cook(self):
+        return next((k for k, p in self.hh["people"].items() if p.get("role") == "cook"), None)
+
+    def plan_card(self, plan, days):
+        cook = self.cook()
+        need = [i for i in plan.get("ingredients", []) if not i.get("have_it")]
+        lines = [f"{d['day']}: " + " · ".join(m["dish"] for m in d["meals"]) for d in plan.get("days", [])]
+        avg = lambda k: round(sum(d.get(k, 0) for d in plan["days"]) / max(1, len(plan["days"])))
+        choices = [{"id": "order", "label": f"Order {len(need)} missing ingredients"}] if need else []
+        if cook and plan.get("days"):
+            choices.append({"id": "brief", "label": f"Call {self.hh['people'][cook]['name']} with tomorrow's menu"})
+        choices.append({"id": "keep", "label": "Just keep the plan"})
+        return Card(self.name, "plan", f"Meal plan: next {days} day{'s' if days > 1 else ''}", lines,
+                    question="What next?", choices=choices,
+                    warnings=[f"Estimated per person per day: {avg('kcal')} kcal, protein {avg('protein_g')} g. "
+                              "Estimates only, not dietary advice."] + ([plan["notes"]] if plan.get("notes") else []),
+                    payload={"plan": plan, "need": need})
+
+    def nutrition_card(self, plan, nut):
+        from app.core import safety
+        from app.experts.health.expert import wa_link
+        text = pl.brief_text(self.hh, plan, nut)
+        verdict = safety.check(text)
+        who = self.hh.get("nutritionist") or {}
+        warnings = {"blocked": ["The safety check held part of this brief. Review it before sharing."],
+                    "unchecked": ["Safety check is off (set GUARDRAIL_ID)."]}.get(verdict.status, [])
+        choices = [{"id": "share", "label": f"WhatsApp draft to {who.get('name', 'your nutritionist')}"}] if who.get("phone") else []
+        return Card(self.name, "brief", f"Nutrition brief for {who.get('name', 'your nutritionist')}", verdict.text.split("\n"),
+                    question="Share it?" if choices else "Add a nutritionist to household.yaml to share it.",
+                    choices=choices + [{"id": "ok", "label": "Keep"}], warnings=warnings,
+                    payload={"text": verdict.text, "safety": verdict.status,
+                             "wa": wa_link(who["phone"], verdict.text) if who.get("phone") else None})
 
     async def handle(self, text, ref=None):
         advice = [str(f["value"]) for f in self.store.facts(prefix="advice:")]
@@ -142,6 +218,18 @@ class KitchenExpert(Expert):
 
     async def execute(self, card, choice):
         p = card["payload"]
+        if card["kind"] == "plan":
+            if choice == "order":
+                text = ", ".join(f"{i['quantity']} {i['item']}" for i in p["need"])
+                self.store.add_card((await self.handle(text)).to_dict())
+                return {"ok": True, "message": "Cart ready: see the new card."}
+            if choice == "brief":
+                tomorrow = (p["plan"].get("days") or [{}])[min(1, len(p["plan"].get("days", [])) - 1)]
+                jid = self.menu_call(self.cook(), tomorrow)
+                return {"ok": True, "message": "Calling the cook with the menu.", "jobs": [jid]}
+            return {"ok": True, "message": "Plan kept."}
+        if card["kind"] == "brief":
+            return {"ok": True, "open": p.get("wa")} if choice == "share" else {"ok": True}
         upi_app = choice.split(":", 1)[1] if choice.startswith("UPI:") else None
         if dry_run():
             return {"ok": True, "dry_run": True,
