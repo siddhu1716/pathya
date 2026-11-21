@@ -164,6 +164,29 @@ export const api = {
   calls: () => request<CallRecord[]>("/api/calls"),
   orders: () => request<Order[]>("/api/orders"),
   line: (id: string, line: Line) => post<{ ok: boolean }>(`/api/calls/${id}/line`, line),
+  kitchen: () => request<KitchenOverview>("/api/kitchen/overview"),
+  reorder: (items: string[]) => post<{ card: string }>("/api/kitchen/reorder", { items }),
+  mealplan: (days: number, notes: string) => post<{ card: string; plan: MealPlan }>("/api/kitchen/mealplan", { days, notes }),
+  nutrition: () => post<Nutrition>("/api/kitchen/nutrition"),
+  shareNutrition: () => post<{ card: string }>("/api/kitchen/nutrition/share"),
+};
+
+export type Usual = { name: string; count: number; typical: number; days_ago: number; store: string; price?: number };
+export type MealPlan = {
+  days: { day: string; meals: { slot: string; dish: string }[]; kcal: number; protein_g: number; carbs_g: number; fat_g: number; fibre_g: number }[];
+  ingredients: { item: string; quantity: string; have_it: boolean }[];
+  notes: string;
+  made?: number;
+  for_days?: number;
+};
+export type Macros = { kcal: number; protein_g: number; carbs_g: number; fat_g: number; fibre_g: number };
+export type Nutrition = {
+  days: number; people: number; orders: number; dry_runs: number; per_person_day: Macros;
+  split: { protein: number; carbs: number; fat: number }; targets: Macros & { source: string }; made?: number;
+};
+export type KitchenOverview = {
+  usuals: Usual[]; plan: MealPlan | null; nutrition: Nutrition | null; targets: Macros & { source: string };
+  nutritionist: string | null; cook: string | null; prefs: { people: number; diet: string; cuisine: string };
 };
 
 export const ago = (ts: number) => {

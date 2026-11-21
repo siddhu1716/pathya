@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { History, Home, Loader2, Package, PhoneCall } from "lucide-react";
+import { History, Home, Loader2, Package, PhoneCall, UtensilsCrossed } from "lucide-react";
 import { ApprovalCard } from "@/components/ApprovalCard";
 import { CallHistory } from "@/components/CallHistory";
+import { KitchenTab } from "@/components/KitchenTab";
 import { Dot, Panel, Pill, Section } from "@/components/kit";
 import { LiveCallBanner } from "@/components/LiveCall";
 import { OrderTracker } from "@/components/OrderTracker";
@@ -12,9 +13,10 @@ import { UpNext } from "@/components/UpNext";
 import { api, AppState } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
-type Tab = "home" | "orders" | "calls" | "activity";
+type Tab = "home" | "kitchen" | "orders" | "calls" | "activity";
 const TABS: { id: Tab; label: string; icon: typeof Home }[] = [
   { id: "home", label: "Home", icon: Home },
+  { id: "kitchen", label: "Kitchen", icon: UtensilsCrossed },
   { id: "orders", label: "Orders", icon: Package },
   { id: "calls", label: "Calls", icon: PhoneCall },
   { id: "activity", label: "Activity", icon: History },
@@ -134,6 +136,8 @@ const Index = () => {
           </>
         )}
 
+        {tab === "kitchen" && <KitchenTab state={s} />}
+
         {tab === "orders" && (
           <Section label="Orders">
             {s.orders.length === 0 ? <p className="text-muted-foreground text-center py-10">No orders yet.</p>
@@ -147,7 +151,7 @@ const Index = () => {
       </main>
 
       <nav className="fixed bottom-0 inset-x-0 z-40 border-t bg-background/90 backdrop-blur pb-[env(safe-area-inset-bottom)]">
-        <div className="max-w-xl mx-auto grid grid-cols-4">
+        <div className="max-w-xl mx-auto grid grid-cols-5">
           {TABS.map((t) => {
             const badge = t.id === "home" ? cards.length : t.id === "orders" ? active.length : 0;
             return (

@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
 
 const KIND: Record<string, string> = {
   order: "Order", booking: "Booking", hold: "Held slot", brief: "Doctor brief", meds: "Prescription",
-  alert: "Urgent", info: "Update", followup: "Follow-up",
+  alert: "Urgent", info: "Update", followup: "Follow-up", plan: "Meal plan",
 };
 const SAFETY: Record<string, [string, "ok" | "warn" | "muted"]> = {
   passed: ["Safety passed", "ok"], blocked: ["Safety held", "warn"], unchecked: ["Safety off", "muted"],
