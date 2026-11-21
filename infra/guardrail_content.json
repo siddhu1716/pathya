@@ -1,0 +1,14 @@
+{
+  "filtersConfig": [
+    {
+      "type": "MISCONDUCT",
+      "inputStrength": "HIGH",
+      "outputStrength": "HIGH"
+    },
+    {
+      "type": "PROMPT_ATTACK",
+      "inputStrength": "HIGH",
+      "outputStrength": "NONE"
+    }
+  ]
+}

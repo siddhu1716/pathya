@@ -1,0 +1,7 @@
+.env
+household.yaml
+quickpick.db
+*.db
+recordings/
+__pycache__/
+.venv/

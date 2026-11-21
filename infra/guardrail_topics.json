@@ -1,0 +1,34 @@
+{
+  "topicsConfig": [
+    {
+      "name": "Diagnosis",
+      "type": "DENY",
+      "definition": "Saying what illness or condition a person has or may have, based on symptoms, readings or reports.",
+      "examples": [
+        "She probably has high blood pressure",
+        "These symptoms mean diabetes",
+        "This sounds like a heart problem"
+      ]
+    },
+    {
+      "name": "Medication advice",
+      "type": "DENY",
+      "definition": "Recommending, starting, stopping, changing or dosing any medicine, supplement or home remedy.",
+      "examples": [
+        "She can take one more tablet tonight",
+        "Stop the BP tablet if she feels dizzy",
+        "Give her a painkiller"
+      ]
+    },
+    {
+      "name": "Result interpretation",
+      "type": "DENY",
+      "definition": "Saying whether a reading, lab value or scan result is normal, high, low, good or bad.",
+      "examples": [
+        "150 by 95 is too high",
+        "Her sugar of 180 is fine",
+        "The report shows nothing serious"
+      ]
+    }
+  ]
+}

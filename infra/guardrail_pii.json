@@ -1,0 +1,16 @@
+{
+  "piiEntitiesConfig": [
+    {
+      "type": "CREDIT_DEBIT_CARD_NUMBER",
+      "action": "BLOCK"
+    }
+  ],
+  "regexesConfig": [
+    {
+      "name": "Aadhaar",
+      "description": "12-digit Aadhaar-like number",
+      "pattern": "\\b\\d{4}\\s?\\d{4}\\s?\\d{4}\\b",
+      "action": "ANONYMIZE"
+    }
+  ]
+}

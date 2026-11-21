@@ -1,0 +1,12 @@
+.env
+household.yaml
+quickpick.db
+*.db
+recordings/
+__pycache__/
+.venv/
+
+.pytest_cache/
+*.pyc
+setup_documents copy/
+setup_documents/0.Readme.md

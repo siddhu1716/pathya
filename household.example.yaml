@@ -1,0 +1,22 @@
+# Who QuickPick works for. Phone numbers in E.164. Only people who agreed to AI calls.
+user:
+  name: Shiva
+  phone: "+91XXXXXXXXXX"
+people:
+  amma:
+    name: Amma
+    language: Telugu
+    age: 60                  # placeholder
+    phone: "+91XXXXXXXXXX"
+    clinic: rao
+  lakshmi:
+    name: Lakshmi garu
+    role: cook
+    language: Telugu
+    phone: "+91XXXXXXXXXX"
+clinics:
+  rao:                       # for the demo, a friend plays the receptionist
+    doctor: "Dr. Rao (placeholder)"
+    clinic: "Sunrise Clinic, Gachibowli (placeholder)"
+    phone: "+91XXXXXXXXXX"
+address_hint: Loft
