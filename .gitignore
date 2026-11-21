@@ -10,3 +10,5 @@ __pycache__/
 *.pyc
 setup_documents copy/
 setup_documents/0.Readme.md
+node_modules/
+web/dist/
