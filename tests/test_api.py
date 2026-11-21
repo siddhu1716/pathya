@@ -143,6 +143,35 @@ def test_twilio_only_when_opted_in_with_real_settings(monkeypatch):
     assert not twilio_ready()
 
 
+def test_exotel_stream_needs_secret_and_routes_caller(env, monkeypatch):
+    import base64
+    import app.core.call_session as cs
+    from starlette.websockets import WebSocketDisconnect
+    client, store, _ = env
+    monkeypatch.setenv("EXOTEL_STREAM_SECRET", "s" * 32)
+    bad = {"Authorization": "Basic " + base64.b64encode(b"quickpick:wrong").decode()}
+    with pytest.raises(WebSocketDisconnect):
+        with client.websocket_connect("/exotel", headers=bad) as ws:
+            ws.receive_text()
+    seen = {}
+
+    async def fake_bridge(ws, call_for_start, finish, hang_up, log, transcript=None, carrier=None):
+        import json as _j
+        msg = _j.loads(await ws.receive_text())
+        call = call_for_start(msg)
+        seen["job"] = call.job
+        await finish(call, [{"role": "them", "text": "hello"}])
+    monkeypatch.setattr(cs, "phone_bridge", fake_bridge)
+    from app.experts.kitchen.expert import KitchenExpert
+    client.app.state.experts["kitchen"] = KitchenExpert(store, HH, None, object())
+    good = {"Authorization": "Basic " + base64.b64encode(("quickpick:" + "s" * 32).encode()).decode()}
+    with client.websocket_connect("/exotel", headers=good) as ws:
+        ws.send_text(json.dumps({"event": "start", "stream_sid": "S1",
+                                 "start": {"stream_sid": "S1", "call_sid": "X7", "from": "09800000001"}}))
+    assert seen["job"]["expert"] == "kitchen" and seen["job"]["person"] == "amma"     # 0-prefixed Indian number
+    assert store.facts("amma", f"call:{seen['job']['id']}")
+
+
 def test_kitchen_503_when_swiggy_not_connected(env):
     client, store, _ = env
     client.app.state.experts["kitchen"] = FakeKitchen(store, connected=False)

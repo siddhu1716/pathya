@@ -1,14 +1,16 @@
-"""Phone calls: Twilio Media Streams <-> OpenAI Realtime (WebSocket), running an Expert's CallPlan.
-Both sides speak G.711 u-law at 8 kHz, so audio passes through untouched. Tools run the Expert's own
-Python functions through the same Call object as browser calls, so every refusal stays in code.
-Hang-up: after end_call, the goodbye is generated, Twilio echoes a "mark" when it has finished playing,
-and only then is the call completed (with a fallback timer)."""
+"""Phone calls: a carrier's media stream (Twilio or Exotel) <-> OpenAI Realtime (WebSocket), running an Expert's
+CallPlan. The model speaks G.711 u-law at 8 kHz; app/core/carriers.py adapts each carrier's protocol and audio.
+Tools run the Expert's own Python functions through the same Call object as browser calls, so every refusal stays
+in code. Hang-up: after end_call the goodbye is generated, the carrier echoes a "mark" once it has played, and only
+then is the call ended (with a fallback timer)."""
 import asyncio
+import inspect
 import json
 import os
 from contextlib import asynccontextmanager
 
 from app.core.browser_call import greeting_event, session_config
+from app.core.carriers import Twilio
 
 GOODBYE_MARK = "goodbye"
 
@@ -23,36 +25,42 @@ async def connect_openai(model=None):
         yield ws
 
 
-async def phone_bridge(twilio, call_for_start, finish, hang_up, log, connect=connect_openai, fallback_s=15,
-                       transcript=None):
-    """twilio: a WebSocket with receive_text/send_text. call_for_start(start_msg) -> Call (raises if the
-    stream is not one of our dialled calls). finish(call, transcript) runs once when the stream ends.
-    hang_up(call_sid) ends the phone call. log(what) writes to the timeline. transcript: an optional list
-    the caller owns, filled live (the UI shows it during the call)."""
+async def phone_bridge(ws, call_for_start, finish, hang_up, log, connect=connect_openai, fallback_s=15,
+                       transcript=None, carrier=None):
+    """ws: the carrier's WebSocket (receive_text/send_text). call_for_start(start_msg) -> Call (raises if the stream
+    is not one we expect). finish(call, transcript) runs once when the stream ends. hang_up(call_sid) ends the call
+    (sync: run in a thread; async: awaited). log(what) writes to the timeline. transcript: an optional list the
+    caller owns, filled live. carrier: Twilio() (default) or Exotel()."""
+    carrier = carrier or Twilio()
     start = None
     while start is None:
-        msg = json.loads(await twilio.receive_text())
+        msg = json.loads(await ws.receive_text())
         if msg.get("event") == "start":
             start = msg
         elif msg.get("event") == "stop":
             return
     call = call_for_start(start)
-    stream_sid, call_sid = start["start"]["streamSid"], start["start"]["callSid"]
+    info = carrier.start(start)
+    stream, call_sid = info["stream"], info["call"]
     transcript = transcript if transcript is not None else []
     state = {"ending": False, "hung_up": False}
     timers = []
+
+    async def send(*events):
+        for e in events:
+            await ws.send_text(json.dumps(e))
 
     async def end_phone_call(delay=0):
         await asyncio.sleep(delay)
         if not state["hung_up"]:
             state["hung_up"] = True
             try:
-                await asyncio.to_thread(hang_up, call_sid)
+                if inspect.iscoroutinefunction(hang_up):
+                    await hang_up(call_sid)
+                else:
+                    await asyncio.to_thread(hang_up, call_sid)
             except Exception as err:                        # the person may have hung up already
                 log(f"hang-up: {err}")
-
-    async def to_twilio(event):
-        await twilio.send_text(json.dumps({**event, "streamSid": stream_sid}))
 
     try:
         async with connect() as oa:
@@ -60,15 +68,16 @@ async def phone_bridge(twilio, call_for_start, finish, hang_up, log, connect=con
                                       "session": session_config(call.plan, audio_format="audio/pcmu")}))
             await oa.send(json.dumps(greeting_event(call.plan)))
 
-            async def from_twilio():
+            async def from_carrier():
                 while True:
                     try:
-                        m = json.loads(await twilio.receive_text())
-                    except Exception:                       # Twilio closed the socket
+                        m = json.loads(await ws.receive_text())
+                    except Exception:                       # the carrier closed the socket
                         return
                     ev = m.get("event")
                     if ev == "media":
-                        await oa.send(json.dumps({"type": "input_audio_buffer.append", "audio": m["media"]["payload"]}))
+                        await oa.send(json.dumps({"type": "input_audio_buffer.append",
+                                                  "audio": carrier.to_model(m["media"]["payload"])}))
                     elif ev == "mark" and (m.get("mark") or {}).get("name") == GOODBYE_MARK:
                         await end_phone_call()              # the goodbye finished playing
                     elif ev == "stop":
@@ -79,9 +88,9 @@ async def phone_bridge(twilio, call_for_start, finish, hang_up, log, connect=con
                     ev = json.loads(raw)
                     t = ev.get("type")
                     if t == "response.output_audio.delta":
-                        await to_twilio({"event": "media", "media": {"payload": ev["delta"]}})
+                        await send(*carrier.media(stream, ev["delta"]))
                     elif t == "input_audio_buffer.speech_started":
-                        await to_twilio({"event": "clear"})  # the person interrupted: stop playing
+                        await send(carrier.clear(stream))   # the person interrupted: stop playing
                     elif t == "conversation.item.input_audio_transcription.completed" and ev.get("transcript", "").strip():
                         transcript.append({"role": "them", "text": ev["transcript"].strip()})
                     elif t == "response.output_audio_transcript.done" and ev.get("transcript", "").strip():
@@ -96,13 +105,15 @@ async def phone_bridge(twilio, call_for_start, finish, hang_up, log, connect=con
                         if ev["name"] == "end_call":
                             state["ending"] = True
                             timers.append(asyncio.create_task(end_phone_call(fallback_s)))
-                    elif t == "response.done" and state["ending"]:
-                        if not any(o.get("type") == "function_call" for o in (ev.get("response") or {}).get("output", [])):
-                            await to_twilio({"event": "mark", "mark": {"name": GOODBYE_MARK}})
+                    elif t == "response.done":
+                        await send(*carrier.flush(stream))
+                        spoke = not any(o.get("type") == "function_call" for o in (ev.get("response") or {}).get("output", []))
+                        if state["ending"] and spoke:
+                            await send(carrier.mark(stream, GOODBYE_MARK))
                     elif t == "error":
                         log(f"realtime error: {(ev.get('error') or {}).get('message')}")
 
-            tasks = [asyncio.create_task(from_twilio()), asyncio.create_task(from_openai())]
+            tasks = [asyncio.create_task(from_carrier()), asyncio.create_task(from_openai())]
             await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
             for t in tasks:
                 t.cancel()

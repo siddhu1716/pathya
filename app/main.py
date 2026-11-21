@@ -115,6 +115,7 @@ def state(request: Request):
         "zepto": getattr(st.experts.get("kitchen"), "zepto", None) is not None,
         "phone": st.twilio is not None,
         "phone_number": os.getenv("TWILIO_FROM") if st.twilio is not None else None,
+        "exotel": len(os.getenv("EXOTEL_STREAM_SECRET", "")) >= 16,
         "user": hh["user"]["name"],
         "people": [{"key": k, "name": v["name"], "role": v.get("role", ""), "language": v.get("language", "")}
                    for k, v in hh["people"].items()],
@@ -471,6 +472,31 @@ def _person_by_phone(hh, number):
                 None)
 
 
+def _answer_incoming(st, caller, call_sid):
+    """Someone phoned QuickPick: household members get the Kitchen list call; anyone else the Doorstep Expert."""
+    person = _person_by_phone(st.household, caller)
+    if person and "kitchen" in st.experts:
+        jid = st.experts["kitchen"].answered(person, call_sid)
+    else:
+        jid = st.experts["doorstep"].answered(call_sid, "".join(c for c in str(caller or "") if c.isdigit())[-4:])
+    st.store.log("caller", jid, f"incoming call from {_who(st.household, person) if person else 'an unknown number'}")
+    return jid
+
+
+def exotel_auth_ok(header):
+    """Exotel's Voicebot applet sends the user:pass from its wss://user:pass@host URL as HTTP Basic auth."""
+    import base64
+    import hmac
+    secret = os.getenv("EXOTEL_STREAM_SECRET", "")
+    if len(secret) < 16 or not (header or "").startswith("Basic "):
+        return False
+    try:
+        given = base64.b64decode(header[6:]).decode()
+    except Exception:
+        return False
+    return hmac.compare_digest(given, f"quickpick:{secret}")
+
+
 # ---------- app ----------
 def build_app(lifespan=None) -> FastAPI:
     app = FastAPI(title="QuickPick Experts", lifespan=lifespan)
@@ -498,13 +524,47 @@ def build_app(lifespan=None) -> FastAPI:
         if not RequestValidator(os.environ["TWILIO_AUTH_TOKEN"]).validate(url, form, request.headers.get("X-Twilio-Signature", "")):
             raise HTTPException(403, "Not signed by Twilio.")
         caller, sid = form.get("From", ""), form.get("CallSid", "")
-        person = _person_by_phone(st.household, caller)
-        if person and "kitchen" in st.experts:
-            jid = st.experts["kitchen"].answered(person, sid)
-        else:
-            jid = st.experts["doorstep"].answered(sid, "".join(c for c in caller if c.isdigit())[-4:])
-        st.store.log("caller", jid, f"incoming call from {_who(st.household, person) if person else 'an unknown number'}")
+        jid = _answer_incoming(st, caller, sid)
         return PlainTextResponse(stream_twiml(os.environ["PUBLIC_HOST"], jid), media_type="text/xml")
+
+    @app.websocket("/exotel")
+    async def exotel_stream(ws: WebSocket):
+        """Exotel Voicebot applet (bidirectional). Every call here is incoming, e.g. Jio forwarding to the ExoPhone."""
+        from app.core.call_session import phone_bridge
+        from app.core.carriers import Exotel
+        st = ws.app.state
+        if not exotel_auth_ok(ws.headers.get("authorization")):
+            await ws.close(code=1008)
+            st.store.log("caller", "exotel", "refused an Exotel stream without the right credentials")
+            return
+        await ws.accept()
+        jid, lines = {}, []
+
+        def call_for_start(msg):
+            info = Exotel().start(msg)
+            job_id = _answer_incoming(st, info["from"], info["call"])
+            call = _phone_call_for_start(st, {"event": "start", "start": {"callSid": info["call"],
+                                                                         "customParameters": {"job_id": job_id}}}, lines)
+            jid["id"] = job_id
+            return call
+
+        async def finish(call, transcript):
+            _finish_call(st, call, call.job["id"], transcript, "phone call")
+
+        async def hang_up(call_sid):
+            await ws.close()                                # Exotel moves to the next applet (Hangup)
+
+        try:
+            await phone_bridge(ws, call_for_start, finish, hang_up,
+                               lambda what: st.store.log("caller", jid.get("id", "exotel"), what),
+                               transcript=lines, carrier=Exotel())
+        except Exception as err:
+            st.store.log("caller", jid.get("id", "exotel"), f"Exotel stream failed: {err}")
+        finally:
+            try:
+                await ws.close()
+            except Exception:
+                pass
 
     @app.websocket("/media-stream")
     async def media_stream(ws: WebSocket):

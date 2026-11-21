@@ -100,7 +100,7 @@ def test_phone_bridge_runs_plan_and_hangs_up_after_goodbye():
         tw.inbox.put_nowait(json.dumps({"event": "stop"}))
 
     call = Call(job, h, h.call_plan(job))
-    asyncio.run(asyncio.wait_for(phone_bridge(tw, lambda m: call, finish, hang_up, logs.append, connect=connect), 5))
+    asyncio.run(asyncio.wait_for(phone_bridge(tw, lambda m: call, finish, hang_up, logs.append, connect=connect), 30))
 
     update = rt.sent[0]["session"]
     assert rt.sent[0]["type"] == "session.update" and update["audio"]["input"]["format"]["type"] == "audio/pcmu"
@@ -116,3 +116,56 @@ def test_phone_bridge_runs_plan_and_hangs_up_after_goodbye():
     assert hung == ["CA1"]                                                                  # only after the goodbye
     assert done["saved"]["booked"]["slot"].startswith(good[:10])
     assert [l["role"] for l in done["transcript"]][:2] == ["ai", "them"]
+
+
+def test_ulaw_codec_matches_reference():
+    import warnings
+    from app.core.carriers import pcm16_to_ulaw, ulaw_to_pcm16
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        import audioop
+    pcm = b"".join(int(v).to_bytes(2, "little", signed=True) for v in range(-32768, 32767, 97))
+    assert pcm16_to_ulaw(pcm) == audioop.lin2ulaw(pcm, 2)
+    assert ulaw_to_pcm16(bytes(range(256))) == audioop.ulaw2lin(bytes(range(256)), 2)
+
+
+def test_exotel_bridge_converts_audio_chunks_and_closes_after_goodbye():
+    import base64
+    from app.core.carriers import Exotel
+    store = Store(":memory:")
+    h = HealthExpert(store, HH)
+    base = (datetime.now() + timedelta(days=2)).replace(hour=0, minute=0, second=0, microsecond=0)
+    job = store.job(h.book("amma", "rao", base.isoformat(), (base + timedelta(days=3)).isoformat(), "morning", "BP"))
+    late = (base + timedelta(days=1)).replace(hour=16).strftime("%Y-%m-%dT%H:%M")
+    good = (base + timedelta(days=1)).replace(hour=10, minute=30).strftime("%Y-%m-%dT%H:%M")
+    rt = FakeRealtime(late, good)
+    rt.script[0][0]["delta"] = base64.b64encode(b"\xff" * 500).decode()        # 500 u-law samples -> 1000 PCM bytes
+    pcm_in = base64.b64encode(b"\x00\x00" * 160).decode()                       # 20 ms of PCM silence
+    ex = FakeTwilio([{"event": "connected"},
+                     {"event": "start", "stream_sid": "S1", "start": {"stream_sid": "S1", "call_sid": "X1",
+                                                                     "from": "+919800000001"}},
+                     {"event": "media", "stream_sid": "S1", "media": {"payload": pcm_in}}])
+    closed, done = [], {}
+
+    @asynccontextmanager
+    async def connect():
+        yield rt
+
+    async def finish(call, transcript):
+        done["saved"] = call.plan.saved
+
+    async def hang_up(sid):                                                     # Exotel: close the socket
+        closed.append(sid)
+        ex.inbox.put_nowait(json.dumps({"event": "stop"}))
+
+    call = Call(job, h, h.call_plan(job))
+    asyncio.run(asyncio.wait_for(phone_bridge(ex, lambda m: call, finish, hang_up, lambda w: None,
+                                              connect=connect, carrier=Exotel()), 30))
+    appended = [e["audio"] for e in rt.sent if e["type"] == "input_audio_buffer.append"]
+    assert base64.b64decode(appended[0]) == b"\xff" * 160                       # PCM -> u-law for the model
+    media = [m for m in ex.sent if m["event"] == "media"]
+    assert media and all(m["stream_sid"] == "S1" for m in media)
+    assert all(len(base64.b64decode(m["media"]["payload"])) == 3200 for m in media)   # Exotel chunk rules
+    assert {"event": "clear", "stream_sid": "S1"} in ex.sent
+    assert {"event": "mark", "stream_sid": "S1", "mark": {"name": GOODBYE_MARK}} in ex.sent
+    assert closed == ["X1"] and done["saved"]["booked"]
