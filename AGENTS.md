@@ -22,8 +22,10 @@ Python 3.11+, FastAPI, Jinja2 + HTMX (Pico.css), SQLite (app/core/store.py), ope
 - app/concierge.py: one sentence to the right Experts
 - app/core/: store.py, jobs.py, caller.py, safety.py, call_session.py
 - app/experts/base.py: the Expert contract and registry
-- app/experts/kitchen/: swiggy.py (ordering rules, tested), expert.py
+- app/experts/kitchen/: swiggy.py (ordering rules, tested), zepto.py, planner.py, pantry.py (at home, food log), expert.py
 - app/experts/health/: expert.py, rx.py
+- app/experts/home/: the user's own line (orders, food log, medicine check-in in their words); doorstep/: unknown callers
+- app/core/lang.py: call languages (Telugu default; household.yaml `language:` and per-person `language:`)
 - app/templates/, scripts/first_order.py, tests/, infra/
 
 ## Commands
