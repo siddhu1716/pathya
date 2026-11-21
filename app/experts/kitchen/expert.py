@@ -18,6 +18,15 @@ def dry_run():
     return os.getenv("DRY_RUN", "1") == "1"          # default: no real checkout while building
 
 
+def for_people(msg):
+    """Swiggy's message exactly as sent, minus the instructions it appends for AI clients
+    ("[IMPORTANT: Display the above message exactly as-is ...]", "⚠️ A rich UI widget ...")."""
+    for marker in ("[IMPORTANT", "⚠️ A rich UI widget"):
+        if marker in msg:
+            msg = msg.split(marker, 1)[0]
+    return msg.strip()
+
+
 class KitchenExpert(Expert):
     name, title = "kitchen", "Kitchen Expert"
     handles = "groceries, milk, vegetables, kitchen supplies, the weekly list, reorders, meal-plan ingredients"
@@ -95,14 +104,28 @@ class KitchenExpert(Expert):
             return {"ok": True, "dry_run": True,
                     "message": f"DRY RUN: would place {card['total']} by {'UPI' if upi_app else 'cash on delivery'}."}
         order, msg = await sw.place(self.ops, p["address_id"], p["approved_total"], upi_app)
-        out = {"ok": True, "message": msg, "order": order, "cancel": sw.CANCEL}   # show msg exactly as sent
+        out = {"ok": True, "message": for_people(msg), "order": order, "cancel": sw.CANCEL}
         if order.get("status") == "PENDING_PAYMENT":
             out["pay_url"] = order["bridgeUrl"]       # open it; run settle() in the background
+        else:
+            out["eta"] = await self.etas(order, p["address_id"])
         return out
 
     async def settle(self, order):
         """UPI only: wait for the payment inside Swiggy's window; confirm only if needed."""
-        return await sw.finish_upi(self.ops, order)
+        ok, msg = await sw.finish_upi(self.ops, order)
+        return ok, for_people(msg)
 
     async def eta(self, order_id, address_id):
         return await sw.eta(self.ops, order_id, address_id)
+
+    async def etas(self, order, address_id):
+        """Multi-store carts come back as several orders; an ETA lookup failure never fails the order."""
+        out = {}
+        for o in order.get("orders") or [order]:
+            if o.get("orderId"):
+                try:
+                    out[o["orderId"]] = await self.eta(o["orderId"], address_id)
+                except Exception as err:
+                    out[o["orderId"]] = f"ETA unavailable ({err})"
+        return out

@@ -76,6 +76,17 @@ class Store:
         rows = self.db.execute("SELECT id FROM approvals WHERE status=? ORDER BY created DESC", (status,)).fetchall()
         return [self.card(r["id"]) for r in rows]
 
+    def recent_cards(self, limit=8):
+        """Cards a human already acted on (running, done, failed, rejected), newest first."""
+        rows = self.db.execute("SELECT id FROM approvals WHERE status!='waiting' ORDER BY updated DESC LIMIT ?",
+                               (limit,)).fetchall()
+        return [self.card(r["id"]) for r in rows]
+
+    def note(self, aid, result):
+        """Save an interim result on a running card (e.g. UPI waiting for payment). Status is unchanged."""
+        self.db.execute("UPDATE approvals SET result=?, updated=? WHERE id=? AND status='running'",
+                        (json.dumps(result, default=str), time.time(), aid))
+
     # ---- jobs: calls and tasks that run later ----
     def add_job(self, expert, kind, person, payload, run_at=None):
         jid = _new_id()
@@ -113,6 +124,12 @@ class Store:
         """Demo button: a scheduled job becomes due immediately."""
         return self.db.execute("UPDATE jobs SET run_at=? WHERE id=? AND status='scheduled'",
                                (time.time(), jid)).rowcount == 1
+
+    def recent_jobs(self, since):
+        """Jobs that already ran since a timestamp (calls ringing or finished), newest first."""
+        rows = self.db.execute("SELECT id FROM jobs WHERE status!='scheduled' AND run_at>=? ORDER BY run_at DESC",
+                               (since,)).fetchall()
+        return [self.job(r["id"]) for r in rows]
 
     # ---- facts: household memory shared by all Experts ----
     def remember(self, person, key, value, source):
