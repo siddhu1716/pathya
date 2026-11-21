@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT / ".env")                      # before the Experts read env vars at import time
 
-from fastapi import APIRouter, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket
 from fastapi.responses import FileResponse, PlainTextResponse
 from pydantic import BaseModel
 
@@ -42,12 +42,11 @@ def twilio_ready():
             and "." in os.getenv("PUBLIC_HOST", "") and "xxxx" not in os.getenv("PUBLIC_HOST", ""))
 
 
-def make_dialer(store):
-    """Real phone calls only with CALL_MODE=twilio and valid credentials; otherwise calls ring in the browser."""
-    if twilio_ready():
-        from twilio.rest import Client
+def make_dialer(store, twilio_client=None):
+    """Real phone calls with a Twilio client (CALL_MODE=twilio and valid settings); otherwise calls ring in the browser."""
+    if twilio_client is not None:
         from app.core.caller import make_dial
-        return make_dial(Client(os.environ["TWILIO_ACCOUNT_SID"], os.environ["TWILIO_AUTH_TOKEN"]))
+        return make_dial(twilio_client)
     if os.getenv("CALL_MODE") == "twilio":
         store.log("caller", "setup", "CALL_MODE=twilio but the Twilio settings in .env are incomplete; using browser calls")
 
@@ -346,21 +345,48 @@ async def _after_call(st, call, jid):
         st.store.log(call.expert.name, jid, f"after the call failed: {err}")
 
 
-@api.post("/calls/{jid}/end")
-async def call_end(jid: str, body: CallEnd, request: Request):
-    st = _st(request)
-    call = _live(request, jid)
+def _finish_call(st, call, jid, transcript, source):
+    """Browser or phone: save the transcript once, then let the Expert turn the call into a card."""
     if call.ended:
-        return {"ok": True}
+        return
     call.ended = True
     secs = int(time.time() - call.started)
     st.store.remember(call.job["person"], f"call:{jid}",
-                      {"transcript": body.transcript[-200:], "saved": call.plan.saved, "seconds": secs}, "browser call")
+                      {"transcript": transcript[-200:], "saved": call.plan.saved, "seconds": secs}, source)
     st.store.log(call.expert.name, jid, f"call ended after {secs} s")
     st.tasks.add(t := asyncio.create_task(_after_call(st, call, jid)))     # e.g. building the cart takes ~30 s
     t.add_done_callback(st.tasks.discard)
     st.calls.pop(jid, None)
+
+
+@api.post("/calls/{jid}/end")
+async def call_end(jid: str, body: CallEnd, request: Request):
+    st = _st(request)
+    call = st.calls.get(jid)
+    if call:
+        _finish_call(st, call, jid, body.transcript, "browser call")
+    elif not st.store.facts(prefix=f"call:{jid}"):
+        raise HTTPException(409, "This call has not been answered.")
     return {"ok": True}
+
+
+def _phone_call_for_start(st, msg):
+    """Only streams for calls we dialled: the job exists, is a call kind, and Twilio's CallSid matches."""
+    from app.core.browser_call import Call
+    from app.core.caller import job_id_from_start
+    jid = job_id_from_start(msg)
+    job = jid and st.store.job(jid)
+    expert = job and st.experts.get(job["expert"])
+    if not job or not expert or job["kind"] not in expert.call_kinds:
+        raise RuntimeError(f"Unknown call stream for job {jid!r}")
+    if not isinstance(job.get("result"), dict) or job["result"].get("call_sid") != msg["start"].get("callSid"):
+        raise RuntimeError(f"Call SID does not match job {jid}")
+    if jid in st.calls or st.store.facts(prefix=f"call:{jid}"):
+        raise RuntimeError(f"Job {jid} already has a call")
+    call = Call(job, expert, expert.call_plan(job))
+    st.calls[jid] = call
+    st.store.log(expert.name, jid, f"{job['person']} answered the phone, limit {call.plan.max_minutes} min")
+    return call
 
 
 # ---------- app ----------
@@ -375,6 +401,36 @@ def build_app(lifespan=None) -> FastAPI:
         store.log("caller", form.get("CallSid", ""), f"call {form.get('CallStatus', '')} "
                                                     f"({form.get('CallDuration', '0')} s)")
         return PlainTextResponse("")
+
+    @app.websocket("/media-stream")
+    async def media_stream(ws: WebSocket):
+        from app.core.call_session import phone_bridge
+        st = ws.app.state
+        await ws.accept()
+        jid = {}
+
+        def call_for_start(msg):
+            call = _phone_call_for_start(st, msg)
+            jid["id"] = call.job["id"]
+            return call
+
+        async def finish(call, transcript):
+            _finish_call(st, call, call.job["id"], transcript, "phone call")
+
+        def hang_up(call_sid):
+            from app.core.caller import hang_up as twilio_hang_up
+            twilio_hang_up(st.twilio, call_sid)
+
+        try:
+            await phone_bridge(ws, call_for_start, finish, hang_up,
+                               lambda what: st.store.log("caller", jid.get("id", "stream"), what))
+        except Exception as err:
+            st.store.log("caller", jid.get("id", "stream"), f"phone stream failed: {err}")
+        finally:
+            try:
+                await ws.close()
+            except Exception:
+                pass
 
     dist = ROOT / "web" / "dist"
 
@@ -391,6 +447,7 @@ def build_app(lifespan=None) -> FastAPI:
 
     app.state.tasks = set()
     app.state.calls = {}
+    app.state.twilio = None
     return app
 
 
@@ -415,7 +472,12 @@ async def lifespan(app: FastAPI):
         register(KitchenExpert(store, hh, agent_im, ops))
         register(HealthExpert(store, hh))
         app.state.store, app.state.household, app.state.experts = store, hh, REGISTRY
-        dispatch = J.make_dispatch(store, REGISTRY, make_dialer(store))
+        if twilio_ready():
+            from twilio.rest import Client
+            app.state.twilio = Client(os.environ["TWILIO_ACCOUNT_SID"], os.environ["TWILIO_AUTH_TOKEN"])
+            store.log("caller", "setup", f"phone calls via Twilio {os.environ['TWILIO_FROM']} "
+                                         f"(stream: wss://{os.environ['PUBLIC_HOST']}/media-stream)")
+        dispatch = J.make_dispatch(store, REGISTRY, make_dialer(store, app.state.twilio))
         scheduler = asyncio.create_task(J.run_forever(store, dispatch, every=5))
         store.log("app", "start", f"QuickPick started (DRY_RUN={os.getenv('DRY_RUN', '1')})")
         try:

@@ -23,19 +23,28 @@ def tool_specs(plan):
     return specs
 
 
-def session_config(plan, model=None, voice=None):
+def session_config(plan, model=None, voice=None, audio_format=None):
+    """audio_format: None for WebRTC (negotiated); "audio/pcmu" for Twilio phone calls (G.711 u-law, 8 kHz)."""
+    audio_in = {"transcription": {"model": os.getenv("TRANSCRIBE_MODEL", "gpt-4o-mini-transcribe")},
+                "turn_detection": {"type": "semantic_vad"}}
+    audio_out = {"voice": voice or os.getenv("REALTIME_VOICE", "marin")}
+    if audio_format:
+        audio_in["format"] = audio_out["format"] = {"type": audio_format}
     return {
         "type": "realtime",
         "model": model or os.getenv("REALTIME_MODEL", "gpt-realtime-2.1"),
         "instructions": plan.instructions,
-        "audio": {
-            "input": {"transcription": {"model": os.getenv("TRANSCRIBE_MODEL", "gpt-4o-mini-transcribe")},
-                      "turn_detection": {"type": "semantic_vad"}},
-            "output": {"voice": voice or os.getenv("REALTIME_VOICE", "marin")},
-        },
+        "audio": {"input": audio_in, "output": audio_out},
         "tools": tool_specs(plan),
         "tool_choice": "auto",
     }
+
+
+def greeting_event(plan):
+    """First response once the person answers: the greeting that says it is an AI."""
+    return {"type": "response.create", "response": {
+        "instructions": f'The person just answered. Your first sentence must be exactly: "{plan.greeting}" '
+                        "Then continue as instructed."}}
 
 
 async def answer_sdp(offer_sdp, config, api_key=None, client=None):
