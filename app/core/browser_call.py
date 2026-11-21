@@ -26,10 +26,13 @@ def tool_specs(plan):
 
 
 def session_config(plan, model=None, voice=None, audio_format=None):
-    """audio_format: None for WebRTC (negotiated); "audio/pcmu" for Twilio phone calls (G.711 u-law, 8 kHz)."""
-    audio_in = {"transcription": {"model": os.getenv("TRANSCRIBE_MODEL", "gpt-4o-mini-transcribe")},
-                "turn_detection": {"type": "semantic_vad"}}
-    audio_out = {"voice": voice or os.getenv("REALTIME_VOICE", "marin")}
+    """audio_format: None for WebRTC (negotiated); "audio/pcmu" for Twilio phone calls (G.711 u-law, 8 kHz).
+    Voice, pace and turn-taking come from plan.voice (app/core/voice.py; the family's choice in the app)."""
+    from app.core import voice as V
+    audio_in, audio_out = V.realtime(getattr(plan, "voice", None), phone=bool(audio_format))
+    audio_in["transcription"] = {"model": os.getenv("TRANSCRIBE_MODEL", "gpt-4o-mini-transcribe")}
+    if voice:
+        audio_out["voice"] = voice
     if audio_format:
         audio_in["format"] = audio_out["format"] = {"type": audio_format}
     return {

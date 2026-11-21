@@ -15,6 +15,7 @@ class CallPlan:
     max_minutes: int = 5
     saved: dict = field(default_factory=dict)
     language: str = ""                    # the call opens in this language (app/core/lang.py); then follows the person
+    voice: dict = field(default_factory=dict)   # app/core/voice.py settings for this call, set when the call starts
 
 
 @dataclass

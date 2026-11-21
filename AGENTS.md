@@ -28,7 +28,9 @@ Python 3.11+, FastAPI, Jinja2 + HTMX (Pico.css), SQLite (app/core/store.py), ope
 - app/experts/home/: the Family line: check-in and medicine reminder calls for any member with a household.yaml phone; doorstep/: unknown callers
 - app/core/lang.py: call languages (Telugu default; household.yaml `language:` and per-person `language:`)
 - app/core/convo.py: every call follows the caller's language and wraps up before end_call (refused until they confirm)
+- app/core/voice.py: voice, accent, pace, turn-taking and the family's style notes (placed below the rules, never above)
 - web/: the React app (Home, Family, Meals, Orders, More)
+- mobile/: Android app (Capacitor launcher that opens the user's Pathya link; build with mobile/build-apk.ps1)
 - app/templates/, scripts/first_order.py, tests/, infra/
 
 ## Commands

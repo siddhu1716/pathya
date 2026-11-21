@@ -19,6 +19,14 @@ and turns what is missing into a Swiggy Instamart cart you approve with one tap.
   - Calls open in Telugu and follow whatever language the person speaks.
   - A call never hangs up while something is pending.
   - Family members can also call in. The cook gets the grocery-list call; delivery partners get the Doorstep Expert.
+- **Voice:** More > Pathya's voice, for every call.
+  - Pick one of the 10 OpenAI voices and hear a sample.
+  - Choose an Indian or neutral accent and a pace.
+  - Set how long Pathya waits when someone pauses, and whether people can talk over it.
+  - Add your own instructions on how to speak. They sit below Pathya's rules and can't override them; the hard rules
+    are also enforced in code.
+  - Members 60+ get the slow, patient setting.
+  - "See the full prompt" shows exactly what Pathya is told on a check-in call.
 - **Meals:** pick who is eating and add guests. You get one menu for the cook, and each person's plate food by food
   with quantities ("rice 0.5 cup, dal 1.5 katori").
   - +/- changes their totals exactly, and "Fit to target" scales a plate to that person's energy target.
@@ -75,6 +83,13 @@ npx -y mcp-remote https://mcp.swiggy.com/im    # sign in to Swiggy once
 
 Tests: `python tests/test_swiggy_flow.py && python tests/test_v2.py && pytest -q`
 
+**Phone app.**
+- iPhone and Android: open the link in the browser and choose "Add to Home Screen" or "Install app".
+- Android also has an APK. Build it with `mobile/build-apk.ps1` (JDK 21, Android SDK 36), then download it from
+  More > Android app (`/pathya.apk`).
+- The APK is a small launcher: it asks once for your Pathya link (the one with `?key=`) and opens it.
+- When the tunnel restarts, paste the new link (More > Change server link).
+
 ## How it fits together
 
 ```
@@ -90,8 +105,9 @@ phone / browser ──► OpenAI Realtime (gpt-realtime) ──► Expert tools 
 - `app/experts/home/`: check-in and reminder calls (the Family line)
 - `app/experts/kitchen/`: Swiggy and Zepto carts, meal planner, pantry and food log
 - `app/experts/health/`: clinic booking calls, doctor brief, prescription reader
-- `app/core/`: store, scheduler, call bridges (Twilio and Exotel), languages, call rules
+- `app/core/`: store, scheduler, call bridges (Twilio and Exotel), languages, call rules, voice settings
 - `web/`: the phone-first app (Home, Family, Meals, Orders, More)
+- `mobile/`: the Android app (Capacitor launcher for your Pathya link)
 
 ## Built before / built at Builders '26
 

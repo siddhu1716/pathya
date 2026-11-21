@@ -92,7 +92,8 @@ async def phone_bridge(ws, call_for_start, finish, hang_up, log, connect=connect
                     if t == "response.output_audio.delta":
                         await send(*carrier.media(stream, ev["delta"]))
                     elif t == "input_audio_buffer.speech_started":
-                        await send(carrier.clear(stream))   # the person interrupted: stop playing
+                        if (getattr(call.plan, "voice", None) or {}).get("interrupt", True):
+                            await send(carrier.clear(stream))   # the person interrupted: stop playing
                     elif t == "conversation.item.input_audio_transcription.completed" and ev.get("transcript", "").strip():
                         transcript.append({"role": "them", "text": ev["transcript"].strip()})
                     elif t == "response.output_audio_transcript.done" and ev.get("transcript", "").strip():

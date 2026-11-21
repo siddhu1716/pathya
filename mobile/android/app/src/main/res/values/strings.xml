@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Pathya</string>
+    <string name="title_activity_main">Pathya</string>
+    <string name="package_name">app.pathya.family</string>
+    <string name="custom_url_scheme">app.pathya.family</string>
+</resources>

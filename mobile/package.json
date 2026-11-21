@@ -1,0 +1,17 @@
+{
+  "name": "pathya-android",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Pathya for Android: a launcher that opens your Pathya server (the link with ?key=) in the app.",
+  "scripts": {
+    "sync": "cap sync android"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.6.2",
+    "@capacitor/app": "^8.1.2",
+    "@capacitor/core": "^8.6.2"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.6.2"
+  }
+}

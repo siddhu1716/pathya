@@ -114,6 +114,7 @@ export type AppState = {
   phone: boolean;
   phone_number: string | null;
   exotel: boolean;
+  android_apk?: boolean;
   user: string;
   language: string;
   daily_call: number | null;
@@ -239,7 +240,22 @@ export const api = {
   decline: (id: string) => post<{ ok: boolean }>(`/api/calls/${id}/decline`),
   bookRequest: (b: { patient: string; hospital: string; doctor: string; area: string; reason: string; from_date: string; to_date: string; part: string }) =>
     post<{ card: string }>("/api/health/request", b),
+  voice: () => request<VoiceView>("/api/voice"),
+  saveVoice: (s: Partial<VoiceSettings>) =>
+    request<VoiceView>("/api/voice", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(s) }),
+  voicePrompt: (who: string) => request<VoicePrompt>(`/api/voice/prompt?who=${encodeURIComponent(who)}`),
+  /** A short spoken sample of a voice (mp3). */
+  voicePreview: async (s: Partial<VoiceSettings>) => {
+    const res = await apiFetch("/api/voice/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(s) });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || `${res.status}`);
+    return res.blob();
+  },
 };
+
+export type VoiceSettings = { voice: string; accent: "indian" | "neutral"; pace: "slow" | "normal" | "fast";
+  patience: "quick" | "normal" | "patient"; interrupt: boolean; elders_slow: boolean; notes: string };
+export type VoiceView = { settings: VoiceSettings; voices: { id: string; about: string }[]; notes_max: number; call_ends: string };
+export type VoicePrompt = { who: string; greeting: string; prompt: string; tools: string[]; max_minutes: number; voice: VoiceSettings };
 
 export type BodyReport = { date?: string | null; weight_kg?: number | null; height_cm?: number | null; body_fat_pct?: number | null;
   skeletal_muscle_kg?: number | null; fat_mass_kg?: number | null; bmr_kcal?: number | null; visceral_fat_level?: number | null };

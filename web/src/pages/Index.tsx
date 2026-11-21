@@ -1,16 +1,18 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Camera, Home, Loader2, Menu, Package, Users, UtensilsCrossed } from "lucide-react";
+import { Camera, Download, Home, Loader2, Menu, Package, Smartphone, Users, UtensilsCrossed } from "lucide-react";
+import { toast } from "sonner";
 import { ScanSheet } from "@/components/Scan";
 import { Button } from "@/components/ui/button";
 import { ApprovalCard } from "@/components/ApprovalCard";
 import { CallHistory } from "@/components/CallHistory";
 import { FamilyStrip, FamilyTab } from "@/components/FamilyTab";
 import { KitchenTab } from "@/components/KitchenTab";
-import { Dot, Panel, Pill, Section } from "@/components/kit";
+import { Dot, Panel, Pill, Row, Section } from "@/components/kit";
 import { LiveCallBanner } from "@/components/LiveCall";
 import { OrderTracker } from "@/components/OrderTracker";
 import { CallSettings, Forwarding, QuickActions } from "@/components/QuickActions";
+import { VoicePanel } from "@/components/VoiceSettings";
 import { PhoneIncoming } from "lucide-react";
 import { Timeline } from "@/components/Timeline";
 import { UpNext } from "@/components/UpNext";
@@ -44,6 +46,34 @@ function Lines({ s }: { s: AppState }) {
           </span>
         </div>
       ))}
+    </Panel>
+  );
+}
+
+// The Android app (mobile/) opens this UI in a WebView whose user agent ends with "PathyaAndroid".
+const IN_ANDROID_APP = navigator.userAgent.includes("PathyaAndroid");
+
+/** More tab: in a browser, download the Android app and copy the link it needs; in the app, change that link. */
+function AndroidApp() {
+  if (IN_ANDROID_APP) {
+    return (
+      <Panel className="overflow-hidden">
+        <Row icon={Smartphone} title="Change server link" sub="After a tunnel restart, paste the new Pathya link"
+             onClick={() => window.location.assign("https://localhost/?change=1")} />
+      </Panel>
+    );
+  }
+  const link = `${server() || window.location.origin}/${key() ? `?key=${encodeURIComponent(key())}` : ""}`;
+  return (
+    <Panel className="p-4 space-y-3">
+      <p className="text-[14px]">Install Pathya on an Android phone: download it, open the file and allow installs from this browser once.
+        The app then asks for your Pathya link.</p>
+      <a href={`${server()}/pathya.apk`} download="Pathya.apk"
+         className="h-12 w-full rounded-xl bg-primary text-primary-foreground text-[15px] flex items-center justify-center gap-2">
+        <Download className="w-4 h-4" /> Download Pathya.apk
+      </a>
+      <Button variant="outline" className="w-full h-11" onClick={() => navigator.clipboard?.writeText(link).then(() => toast.success("Link copied"))
+        .catch(() => toast.error("Copy failed"))}>Copy my Pathya link</Button>
     </Panel>
   );
 }
@@ -178,6 +208,7 @@ const Index = () => {
         {tab === "more" && (
           <>
             <Section label="Calls"><CallSettings state={s} /></Section>
+            <Section label="Pathya's voice"><VoicePanel /></Section>
             <Section label="Answer my calls"><Forwarding /></Section>
             <Section label="Call history"><CallHistory /></Section>
             {s.recent.length > 0 && (
@@ -186,6 +217,7 @@ const Index = () => {
               </Section>
             )}
             <Section label="Connections"><Lines s={s} /></Section>
+            {(IN_ANDROID_APP || s.android_apk) && <Section label="Android app"><AndroidApp /></Section>}
             <Section label="Activity"><Timeline events={s.timeline} /></Section>
           </>
         )}

@@ -13,6 +13,7 @@ import yaml
 from dotenv import load_dotenv
 
 ROOT = Path(__file__).resolve().parent.parent
+APK = ROOT / "mobile" / "pathya.apk"
 load_dotenv(ROOT / ".env")                      # before the Experts read env vars at import time
 
 from fastapi import APIRouter, FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket
@@ -135,6 +136,7 @@ def state(request: Request):
         "phone": st.twilio is not None,
         "phone_number": os.getenv("TWILIO_FROM") if st.twilio is not None else None,
         "exotel": len(os.getenv("EXOTEL_STREAM_SECRET", "")) >= 16,
+        "android_apk": APK.is_file(),
         "user": hh["user"]["name"],
         "language": lang_default(hh),
         "daily_call": getattr(st.experts.get("home"), "daily_hour", lambda: None)(),
@@ -171,6 +173,96 @@ def forwarding(request: Request):
                       {"when": "Busy", "on": f"*405*{number}#", "off": "##405#"},
                       {"when": "Unreachable", "on": f"*409*{number}#", "off": "##409#"}] if number else [],
             "off_all": "##002#", "other_networks": f"**61*+91{number}# (not answered), **67*+91{number}# (busy)" if number else ""}
+
+
+def _voice_for(st, job):
+    """This call's voice settings: the family's choice; members aged 60+ get the slower, patient turn-taking."""
+    from app.core import voice
+    from app.experts.family import profiles as P
+    try:
+        m = P.member(st.household, st.store, job["person"])
+    except KeyError:                                   # clinics, delivery partners, unknown callers
+        m = None
+    return voice.for_member(voice.get(st.store), m)
+
+
+class VoiceIn(BaseModel):
+    voice: str | None = None
+    accent: str | None = None
+    pace: str | None = None
+    patience: str | None = None
+    interrupt: bool | None = None
+    elders_slow: bool | None = None
+    notes: str | None = None
+
+
+def _voice_view(s):
+    from app.core import voice as V
+    return {"settings": s, "voices": [{"id": k, "about": v} for k, v in V.VOICES.items()], "accents": list(V.ACCENTS),
+            "paces": list(V.PACES), "patience": list(V.PATIENCE), "notes_max": V.NOTES_MAX, "call_ends": V.CALL_ENDS}
+
+
+@api.get("/voice")
+def voice_settings(request: Request):
+    from app.core import voice as V
+    return _voice_view(V.get(_st(request).store))
+
+
+@api.put("/voice")
+def voice_save(body: VoiceIn, request: Request):
+    """How Pathya sounds on every call from now on (browser, Twilio and Exotel)."""
+    from app.core import voice as V
+    st = _st(request)
+    try:
+        s = V.save(st.store, body.model_dump())
+    except ValueError as err:
+        raise HTTPException(400, str(err))
+    st.store.log("caller", "voice", f"voice: {s['voice']}, {s['accent']} accent, {s['pace']} pace, {s['patience']} "
+                                    f"turn-taking, interruptions {'on' if s['interrupt'] else 'off'}")
+    return _voice_view(s)
+
+
+@api.post("/voice/preview")
+async def voice_preview(body: VoiceIn, request: Request):
+    """A few seconds of a voice saying how a call opens (OpenAI text-to-speech has the same voice names)."""
+    from fastapi.responses import Response
+    from openai import AsyncOpenAI
+    from app.core import voice as V
+    from app.core.lang import greet
+    st = _st(request)
+    try:
+        s = V.clean(body.model_dump(), V.get(st.store))
+    except ValueError as err:
+        raise HTTPException(400, str(err))
+    language = lang_default(st.household)
+    text = f"{greet(language, 'self', st.household['user']['name'])} {V.SAMPLES.get(language, V.SAMPLES['English'])}"
+    cache = st.voice_cache
+    k = (s["voice"], s["accent"], s["pace"], text)
+    if k not in cache:
+        try:
+            r = await AsyncOpenAI().audio.speech.create(model=os.getenv("TTS_MODEL", "gpt-4o-mini-tts"), voice=s["voice"],
+                                                        input=text, instructions=V.preview_instructions(s),
+                                                        response_format="mp3")
+        except Exception as err:
+            raise HTTPException(502, f"Could not make the sample: {err}")
+        if len(cache) > 40:
+            cache.clear()
+        cache[k] = r.content
+    return Response(cache[k], media_type="audio/mpeg")
+
+
+@api.get("/voice/prompt")
+def voice_prompt(request: Request, who: str = "me"):
+    """Read-only: the exact instructions Pathya gets on a check-in call with this person, with the voice settings."""
+    from app.core import convo
+    st = _st(request)
+    home = _expert(request, "home")
+    m = _member(request, who)
+    job = {"id": "preview", "expert": "home", "kind": "home", "person": who, "payload": {"direction": "outbound"}}
+    plan = home.call_plan(job)
+    plan.voice = _voice_for(st, job)
+    return {"who": m["name"], "greeting": plan.greeting, "prompt": convo.instructions(plan),
+            "tools": [f.__name__ for f in plan.tools], "max_minutes": plan.max_minutes, "voice": plan.voice}
 
 
 @api.get("/calls")
@@ -939,6 +1031,7 @@ async def call_sdp(jid: str, request: Request):
     if not offer.strip():
         raise HTTPException(400, "An SDP offer is required.")
     plan = expert.call_plan(job)
+    plan.voice = _voice_for(st, job)
     try:
         answer = await answer_sdp(offer, session_config(plan))
     except Exception as err:
@@ -1068,7 +1161,9 @@ def _phone_call_for_start(st, msg, lines=None):
         raise RuntimeError(f"Call SID does not match job {jid}")
     if jid in st.calls or st.store.facts(prefix=f"call:{jid}"):
         raise RuntimeError(f"Job {jid} already has a call")
-    call = Call(job, expert, expert.call_plan(job))
+    plan = expert.call_plan(job)
+    plan.voice = _voice_for(st, job)
+    call = Call(job, expert, plan)
     st.calls[jid] = call
     _go_live(st, call, lines if lines is not None else [])
     st.store.log(expert.name, jid, f"{_who(st.household, job['person'])} on the phone, limit {call.plan.max_minutes} min")
@@ -1280,6 +1375,13 @@ def build_app(lifespan=None) -> FastAPI:
     import mimetypes
     mimetypes.add_type("application/manifest+json", ".webmanifest")
 
+    @app.get("/pathya.apk", include_in_schema=False)
+    def android_app():
+        """The Android app: a launcher that opens this server's link (no key or secret inside). mobile/build-apk.ps1."""
+        if not APK.is_file():
+            raise HTTPException(404, "The Android app is not built yet: run mobile/build-apk.ps1.")
+        return FileResponse(APK, media_type="application/vnd.android.package-archive", filename="Pathya.apk")
+
     @app.get("/{path:path}", include_in_schema=False)
     def spa(path: str):
         if path.startswith("api/"):
@@ -1296,6 +1398,7 @@ def build_app(lifespan=None) -> FastAPI:
     app.state.live = {}
     app.state.twilio = None
     app.state.hangups = {}
+    app.state.voice_cache = {}
     app.state.household_path = None
     return app
 

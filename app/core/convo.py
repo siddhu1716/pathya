@@ -20,9 +20,11 @@ def language_rule(default):
 
 
 def instructions(plan, default="Telugu"):
-    """The full prompt sent to the Realtime model: language rule first and last (models drift), wrap-up rule."""
+    """The full prompt sent to the Realtime model: language rule first and last (models drift), the Expert's prompt,
+    how to sound (accent, pace, the family's notes: below the rules, never above them), then the wrap-up rule."""
+    from app.core import voice
     rule = language_rule(getattr(plan, "language", "") or default)
-    return f"{rule}\n\n{plan.instructions}\n\n{WRAP_UP}\n\n{rule}"
+    return f"{rule}\n\n{plan.instructions}\n\n{voice.style(getattr(plan, 'voice', None))}{WRAP_UP}\n\n{rule}"
 
 
 def end_call_tool(saved):

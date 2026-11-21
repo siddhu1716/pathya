@@ -6,8 +6,11 @@ import sys
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 
+import pytest
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from app.core import voice
 from app.core.browser_call import Call
 from app.core.call_session import GOODBYE_MARK, phone_bridge
 from app.core.store import Store
@@ -74,7 +77,8 @@ class FakeRealtime:
         return await self.out.get()
 
 
-def test_phone_bridge_runs_plan_and_hangs_up_after_goodbye():
+@pytest.mark.parametrize("interrupt", [True, False])
+def test_phone_bridge_runs_plan_and_hangs_up_after_goodbye(interrupt):
     store = Store(":memory:")
     h = HealthExpert(store, HH)
     base = (datetime.now() + timedelta(days=2)).replace(hour=0, minute=0, second=0, microsecond=0)
@@ -100,17 +104,20 @@ def test_phone_bridge_runs_plan_and_hangs_up_after_goodbye():
         tw.inbox.put_nowait(json.dumps({"event": "stop"}))
 
     call = Call(job, h, h.call_plan(job))
+    call.plan.voice = {**voice.DEFAULTS, "voice": "cedar", "interrupt": interrupt}
     asyncio.run(asyncio.wait_for(phone_bridge(tw, lambda m: call, finish, hang_up, logs.append, connect=connect), 30))
 
     update = rt.sent[0]["session"]
     assert rt.sent[0]["type"] == "session.update" and update["audio"]["input"]["format"]["type"] == "audio/pcmu"
+    assert update["audio"]["output"]["voice"] == "cedar"
+    assert update["audio"]["input"]["turn_detection"]["interrupt_response"] is interrupt
     assert {t["name"] for t in update["tools"]} >= {"book_slot", "end_call"}
     first = rt.sent[1]["item"]["content"][0]["text"]
     assert rt.sent[1]["item"]["role"] == "system" and "Pathya" in first and "AI" in first   # greeting says it is an AI
     assert rt.sent[2] == {"type": "response.create"}                                        # session prompt kept
     assert {"type": "input_audio_buffer.append", "audio": "AAAA"} in rt.sent                # caller audio -> model
     assert {"event": "media", "streamSid": "MZ1", "media": {"payload": "QUJD"}} in tw.sent  # model audio -> caller
-    assert {"event": "clear", "streamSid": "MZ1"} in tw.sent                                # barge-in clears playback
+    assert ({"event": "clear", "streamSid": "MZ1"} in tw.sent) is interrupt                # barge-in clears playback
     outputs = [e["item"]["output"] for e in rt.sent
                if e["type"] == "conversation.item.create" and e["item"]["type"] == "function_call_output"]
     assert outputs[0].startswith("Refused") and outputs[1].startswith("Booked")             # window enforced in code

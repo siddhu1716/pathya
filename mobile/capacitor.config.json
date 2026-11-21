@@ -1,0 +1,13 @@
+{
+  "appId": "app.pathya.family",
+  "appName": "Pathya",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "https",
+    "allowNavigation": ["*.trycloudflare.com", "*.ngrok-free.app", "*.ngrok.app", "*.ngrok.io", "*.vercel.app", "*.loca.lt"]
+  },
+  "android": {
+    "appendUserAgent": "PathyaAndroid",
+    "backgroundColor": "#050505"
+  }
+}
