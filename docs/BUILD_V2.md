@@ -863,7 +863,8 @@ async def place(ops, address_id, approved_total, upi_app=None):
         raise RuntimeError(f"Cart changed to Rs {total:.0f}. Show it again before placing.")
     if total > CAP:
         raise RuntimeError(f"Cart is Rs {total:.0f}, over the Rs {CAP:.0f} cap.")
-    args = {"addressId": address_id, "paymentMethod": "UPI" if upi_app else "COD"}
+    # Cash on delivery: get_payment_options labels it "COD", but checkout only accepts "Cash".
+    args = {"addressId": address_id, "paymentMethod": "UPI" if upi_app else "Cash"}
     if upi_app:
         args["intentApp"] = upi_app                           # id copied exactly from get_payment_options
     try:
@@ -1525,7 +1526,7 @@ async def run():
     # COD path
     f = Fake({"get_cart": R(sc=CART), "checkout": R(sc={"orderId": "O1", "status": "PLACED", "paymentMethod": "COD"}, text="Instamart order placed successfully")})
     d, m = await k.place(f, "A1", 131); assert d["orderId"] == "O1" and m.startswith("Instamart")
-    assert f.calls[-1] == ("checkout", {"addressId": "A1", "paymentMethod": "COD"})
+    assert f.calls[-1] == ("checkout", {"addressId": "A1", "paymentMethod": "Cash"})
     # cart changed since approval -> refuse
     try: await k.place(Fake({"get_cart": R(sc=CART)}), "A1", 120); assert False
     except RuntimeError as e: assert "changed" in str(e)
@@ -1719,7 +1720,7 @@ assert asyncio.run(k.execute(card.to_dict(), "COD"))["dry_run"] and not [n for n
 os.environ["DRY_RUN"] = "0"
 res = asyncio.run(k.execute(card.to_dict(), "COD"))
 assert res["message"] == "Instamart order placed successfully" and "080-67466729" in res["cancel"]
-assert [a for n, a in ops.calls if n == "checkout"] == [{"addressId": "addr1", "paymentMethod": "COD"}]
+assert [a for n, a in ops.calls if n == "checkout"] == [{"addressId": "addr1", "paymentMethod": "Cash"}]
 lp = k.call_plan(st3.job(k.weekly_call("lakshmi")))
 assert "Lakshmi garu" in lp.greeting and "AI assistant" in lp.instructions
 tools(lp)["save_list"](["2 litres paalu", "1 kg kandi pappu"], "")

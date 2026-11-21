@@ -160,7 +160,7 @@ assert asyncio.run(k.execute(card.to_dict(), "COD"))["dry_run"] and not [n for n
 os.environ["DRY_RUN"] = "0"
 res = asyncio.run(k.execute(card.to_dict(), "COD"))
 assert res["message"] == "Instamart order placed successfully" and "080-67466729" in res["cancel"]
-assert [a for n, a in ops.calls if n == "checkout"] == [{"addressId": "addr1", "paymentMethod": "COD"}]
+assert [a for n, a in ops.calls if n == "checkout"] == [{"addressId": "addr1", "paymentMethod": "Cash"}]
 lp = k.call_plan(st3.job(k.weekly_call("lakshmi")))
 assert "Lakshmi garu" in lp.greeting and "AI assistant" in lp.instructions
 tools(lp)["save_list"](["2 litres paalu", "1 kg kandi pappu"], "")

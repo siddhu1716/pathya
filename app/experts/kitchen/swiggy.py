@@ -108,7 +108,8 @@ async def place(ops, address_id, approved_total, upi_app=None):
         raise RuntimeError(f"Cart changed to Rs {total:.0f}. Show it again before placing.")
     if total > CAP:
         raise RuntimeError(f"Cart is Rs {total:.0f}, over the Rs {CAP:.0f} cap.")
-    args = {"addressId": address_id, "paymentMethod": "UPI" if upi_app else "COD"}
+    # Cash on delivery: get_payment_options labels it "COD", but checkout only accepts "Cash".
+    args = {"addressId": address_id, "paymentMethod": "UPI" if upi_app else "Cash"}
     if upi_app:
         args["intentApp"] = upi_app                           # id copied exactly from get_payment_options
     try:

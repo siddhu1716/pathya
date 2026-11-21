@@ -31,7 +31,7 @@ async def run():
     # COD path
     f = Fake({"get_cart": R(sc=CART), "checkout": R(sc={"orderId": "O1", "status": "PLACED", "paymentMethod": "COD"}, text="Instamart order placed successfully")})
     d, m = await k.place(f, "A1", 131); assert d["orderId"] == "O1" and m.startswith("Instamart")
-    assert f.calls[-1] == ("checkout", {"addressId": "A1", "paymentMethod": "COD"})
+    assert f.calls[-1] == ("checkout", {"addressId": "A1", "paymentMethod": "Cash"})
     # cart changed since approval -> refuse
     try: await k.place(Fake({"get_cart": R(sc=CART)}), "A1", 120); assert False
     except RuntimeError as e: assert "changed" in str(e)
