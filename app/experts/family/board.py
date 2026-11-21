@@ -6,9 +6,10 @@ from datetime import datetime, timedelta
 from app.experts.family import profiles
 from app.experts.family.meds import IST
 
-POINTS = {"meal": 5, "on_target": 10, "protein": 5, "fibre": 5, "dose": 10, "checkin": 5, "streak": 10}
+POINTS = {"meal": 5, "on_target": 10, "protein": 5, "fibre": 5, "dose": 10, "checkin": 5, "steps": 5, "streak": 10}
 RULES = ["+5 a meal logged (3 a day)", "+10 a day within 10% of your energy target", "+5 protein target reached",
-         "+5 fibre 80% reached", "+10 a medicine dose taken as written", "+5 a call answered", "+10 a 3-day logging streak"]
+         "+5 fibre 80% reached", "+10 a medicine dose taken as written", "+5 a call answered",
+         "+5 a day with 7,000 steps (from a wearable)", "+10 a 3-day logging streak"]
 
 
 def week_start(now=None):
@@ -25,6 +26,9 @@ def score(store, m, now=None):
     day = start
     while day.timestamp() <= now:
         meals = [f["value"] for f in store.facts(m["key"], f"meal:{day:%Y-%m-%d}:")]
+        moved = next((f["value"] for f in store.facts(m["key"], f"activity:{day:%Y-%m-%d}")), None) or {}
+        if moved.get("steps", 0) >= 7000:
+            pts["steps"] += POINTS["steps"]
         if meals:
             pts["meal"] += POINTS["meal"] * min(3, len(meals))
             total = lambda k: sum(x.get(k, 0) for x in meals)

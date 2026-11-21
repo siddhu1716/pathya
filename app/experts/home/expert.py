@@ -12,6 +12,7 @@ from typing import Literal
 
 from app.core import convo, lang, safety
 from app.experts.base import CallPlan, Card, Expert
+from app.experts.family import checkups, guard
 from app.experts.family import meds as M
 from app.experts.family import profiles as P
 from app.experts.health.expert import NO_ADVICE
@@ -38,7 +39,10 @@ What you can do:
 - Meal ideas: if asked what to eat or cook, suggest one or two simple home dishes from what is at home that fit their
   goal and plate notes (for example less sugar: no sweets, tea without sugar). Ideas only: never mention illnesses,
   numbers or targets, and never give medical or diet advice.
-Never read out order numbers or IDs. {emergency}
+- Their own notes: {notes}. If they ask for something that clashes with a note (for example sweets with "less sugar"),
+  gently remind them of the note in its own words, as the doctor's or family's, never as your own opinion, and offer a
+  better swap (sugar-free, roasted, fruit). If they still want it, add it: {user} sees it flagged before approving.
+{elder}Never read out order numbers or IDs. {emergency}
 Finish with end_call."""
 
 MEDS_CALL = """You are QuickPick, the family's AI assistant (set up by {user}), calling {name} with a medicine reminder.
@@ -148,7 +152,8 @@ class HomeExpert(Expert):
             eaten="; ".join(x["text"] for x in eaten["meals"]) or "nothing noted yet",
             at_home=", ".join(i["name"] for i in shelf[:25]) or "nothing recorded",
             low=", ".join(i["name"] for i in shelf if i["low"]) or "nothing", plate=self.plate(m) or "none",
-            no_advice=NO_ADVICE, emergency=EMERGENCY), greeting, max_minutes=6, language=language)
+            notes=", ".join(guard.notes_of(m)) or "none", elder=self._elder(m),
+            no_advice=NO_ADVICE, emergency=EMERGENCY), greeting, max_minutes=8 if m["elder"] else 6, language=language)
         s = plan.saved
 
         def set_order(items: list[str]) -> str:
@@ -192,6 +197,16 @@ class HomeExpert(Expert):
 
         plan.tools = [dose_taken, self._alert(m, s), convo.end_call_tool(s)]
         return plan
+
+    def _elder(self, m):
+        """Older members: slower, gentler, and alert the family on the signs ICOPE asks about (no judging, no advice)."""
+        if not m["elder"]:
+            return ""
+        watch = " ".join(checkups.watch(self.store, m))
+        return (f"- {m['name']} is {m['age']}: speak slowly, one short question at a time, and repeat back what you "
+                "understood. Ask gently whether they are eating enough and having some dal, curd, milk, eggs or paneer. If "
+                "they say they skipped meals, ate very little, feel weak or dizzy, or had a fall, call alert_family with "
+                "their words (no judging, no advice)." + (f" The family noticed: {watch}" if watch else "") + "\n")
 
     def _alert(self, m, s):
         def alert_family(reason: str) -> str:
@@ -249,7 +264,7 @@ class HomeExpert(Expert):
             self.store.add_card(relay.to_dict())
         items = saved.get("items") or []
         if items and self.kitchen is not None:
-            return await self.kitchen.handle(", ".join(items), ref=job["id"])   # Instamart, else Zepto, else the list
+            return await self.kitchen.handle(", ".join(items), ref=job["id"], who=who)   # flagged against their notes
         if items:
             lines.append("Wanted: " + ", ".join(items) + " (no store connected, so no cart yet)")
         if job["kind"] == "meds" or (not lines and not saved.get("summary")):

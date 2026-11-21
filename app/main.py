@@ -244,9 +244,11 @@ def kitchen_overview(request: Request):
     fact = lambda key: next((f["value"] for f in st.store.facts("home", key)), None)
     cook = st.experts["kitchen"].cook() if "kitchen" in st.experts else None
     k = st.household.get("kitchen") or {}
+    from app.experts.family import profiles as P
     return {"usuals": pl.usuals(st.store), "plan": fact("mealplan"), "nutrition": fact("nutrition"),
             "pantry": pantry.items(st.store), "today": pantry.today(st.store, st.household),
-            "targets": pl.targets(st.household), "nutritionist": (st.household.get("nutritionist") or {}).get("name"),
+            "targets": P.average(P.members(st.household, st.store)),
+            "nutritionist": (st.household.get("nutritionist") or {}).get("name"),
             "cook": st.household["people"][cook]["name"] if cook else None,
             "prefs": {"people": k.get("people", len(st.household["people"]) + 1), "diet": k.get("diet", "vegetarian"),
                       "cuisine": k.get("cuisine", "Telugu home food")}}
@@ -283,6 +285,55 @@ async def kitchen_mealplan(body: PlanAsk, request: Request):
     return {"card": aid, "plan": plan}
 
 
+class PortionIn(BaseModel):
+    day: int
+    meal: int
+    part: int
+    who: str
+    qty: float
+
+
+def _plan(st):
+    plan = next((f["value"] for f in st.store.facts("home", "mealplan") if f["key"] == "mealplan"), None)
+    if not plan:
+        raise HTTPException(409, "Make a meal plan first.")
+    return plan
+
+
+@api.post("/kitchen/mealplan/portion")
+def mealplan_portion(body: PortionIn, request: Request):
+    """+/- on one food for one person: the plan and their totals update (the cook hears the new quantities)."""
+    from app.experts.kitchen import planner as pl
+    st = _st(request)
+    plan = _plan(st)
+    try:
+        plan = pl.set_qty(plan, body.day, body.meal, body.part, body.who, body.qty)
+    except (IndexError, KeyError):
+        raise HTTPException(404, "That part of the plan does not exist.")
+    st.store.remember("home", "mealplan", plan, "family")
+    return plan
+
+
+class FitIn(BaseModel):
+    day: int
+    who: str
+
+
+@api.post("/kitchen/mealplan/fit")
+def mealplan_fit(body: FitIn, request: Request):
+    """Scale one person's quantities for a day to their own energy target."""
+    from app.experts.family import profiles as P
+    from app.experts.kitchen import planner as pl
+    st = _st(request)
+    plan = _plan(st)
+    m = next((x for x in P.members(st.household, st.store) if x["name"] == body.who), None)
+    if not m or not 0 <= body.day < len(plan.get("days", [])):
+        raise HTTPException(404, "No such person or day in this plan.")
+    plan = pl.fit(plan, body.day, body.who, m["targets"]["kcal"])
+    st.store.remember("home", "mealplan", plan, "family")
+    return plan
+
+
 @api.post("/kitchen/nutrition")
 async def kitchen_nutrition(request: Request):
     from app.experts.kitchen import planner as pl
@@ -291,6 +342,8 @@ async def kitchen_nutrition(request: Request):
         nut = await pl.nutrition(st.store, st.household)
     except Exception as err:
         raise HTTPException(502, f"Could not estimate nutrition: {err}")
+    from app.experts.family import profiles as P
+    nut["targets"] = P.average(P.members(st.household, st.store))      # each member's own targets, not one reference
     st.store.remember("home", "nutrition", {**nut, "made": time.time()}, "nutrition estimate")
     return nut
 
@@ -373,13 +426,25 @@ def _member(request, key):
 
 
 def _family_view(st, m):
-    from app.experts.family import meds as M
+    from app.experts.family import checkups, meds as M
+    from app.experts.family import profiles as P
     from app.experts.kitchen import pantry
     home = st.experts.get("home")
+    goal, act = m["targets"], activity_today(st.store, m["key"])
+    if act and act.get("active_kcal") and not m.get("override"):     # a wearable replaces the activity guess
+        base = P.targets({**m, "activity": "sedentary"})
+        goal = {**goal, "kcal": round(base["kcal"] + act["active_kcal"]),
+                "source": goal["source"] + f" Today: sedentary base + {act['active_kcal']:.0f} active kcal from {act['source']}."}
     return {**{k: v for k, v in m.items() if k != "phone"},              # numbers stay on the server
-            "today": pantry.today(st.store, st.household, m["key"], goal=m["targets"]),
+            "today": pantry.today(st.store, st.household, m["key"], goal=goal), "activity": act,
             "meds": M.listed(st.store, m["key"]), "doses": M.today(st.store, m["key"]),
-            "reminders": M.reminders_on(st.store, m["key"]), "daily_hour": home.daily_hour(m["key"]) if home else None}
+            "reminders": M.reminders_on(st.store, m["key"]), "daily_hour": home.daily_hour(m["key"]) if home else None,
+            "checkups": checkups.for_member(m), "watch": checkups.watch(st.store, m)}
+
+
+def activity_today(store, key):
+    from app.experts.family.meds import day_key
+    return next((f["value"] for f in store.facts(key, f"activity:{day_key()}") if f["key"] == f"activity:{day_key()}"), None)
 
 
 @api.get("/family")
@@ -479,6 +544,85 @@ def family_reminders(key: str, body: OnOff, request: Request):
         raise HTTPException(400, f"{m['name']} has no phone number in household.yaml, so QuickPick can't call.")
     jobs = M.set_reminders(st.store, phone, key, body.on)
     return {"ok": True, "on": body.on, "jobs": jobs}
+
+
+class DoseIn(BaseModel):
+    slot: str
+    taken: str = "yes"
+    words: str = ""
+
+
+@api.post("/family/{key}/dose")
+def family_dose(key: str, body: DoseIn, request: Request):
+    """Mark a dose from the app (or after scanning the strip): recorded as the family said it, never judged."""
+    from app.experts.family import meds as M
+    st = _st(request)
+    _member(request, key)
+    if body.slot not in M.SLOTS or body.taken not in ("yes", "no", "not_sure"):
+        raise HTTPException(400, "slot must be morning, afternoon or night; taken yes, no or not_sure.")
+    M.log_dose(st.store, key, body.slot, body.taken, body.words[:200] or "marked in the app")
+    return _family_view(st, _member(request, key))
+
+
+class ActivityIn(BaseModel):
+    steps: int = 0
+    active_kcal: float = 0
+    source: str = "wearable"
+
+
+@api.post("/activity/{key}")
+def activity(key: str, body: ActivityIn, request: Request):
+    """Today's activity from a wearable (Apple Watch via an iPhone Shortcut, or any app that can POST JSON)."""
+    from app.experts.family.meds import day_key
+    st = _st(request)
+    _member(request, key)
+    if not (0 <= body.steps <= 150000 and 0 <= body.active_kcal <= 8000):
+        raise HTTPException(400, "Those numbers look wrong.")
+    st.store.remember(key, f"activity:{day_key()}", {"steps": body.steps, "active_kcal": body.active_kcal,
+                                                     "source": body.source[:40], "ts": time.time()}, body.source[:40])
+    return {"ok": True}
+
+
+@api.post("/scan")
+async def scan_photo(request: Request, who: str = Form("me"), hint: str = Form(""), photo: UploadFile = File(...)):
+    """One photo: a meal is logged for that person; a medicine, prescription or body report comes back for a human to
+    confirm (nothing is scheduled or saved from it until they do)."""
+    from app.experts.family import meds as M
+    from app.experts.family import scan
+    from app.experts.kitchen import pantry
+    st = _st(request)
+    _member(request, who)
+    image, mime = await photo.read(), photo.content_type or "image/jpeg"
+    if len(image) > 12 * 1024 * 1024:
+        raise HTTPException(413, "That photo is too large (12 MB max).")
+    try:
+        seen = await asyncio.to_thread(scan.look, image, mime, hint[:40])
+    except Exception as err:
+        raise HTTPException(502, f"Could not read the photo: {err}")
+    st.store.log("family", who, f"scanned a photo: {seen['kind']}")
+    if seen["kind"] == "meal" and seen.get("meal"):
+        meal = seen["meal"]
+
+        async def as_seen(text):
+            return {k: meal[k] for k in ("kcal", "protein_g", "carbs_g", "fat_g", "fibre_g", "sugar_g")}
+        entry = await pantry.log_meal(st.store, meal["description"][:300], "", who=who, estimate=as_seen)
+        return {"kind": "meal", "entry": entry, "note": seen["note"]}
+    if seen["kind"] == "medicine":
+        listed = M.listed(st.store, who)
+        return {"kind": "medicine", "medicines": seen["medicines"], "note": seen["note"],
+                "matches": [listed[i]["name_as_written"] for i in scan.matches(seen["medicines"], listed)],
+                "due": M.today(st.store, who)}
+    if seen["kind"] == "prescription":
+        from app.experts.health.rx import read_prescription
+        try:
+            rx = await asyncio.to_thread(read_prescription, image, mime)
+        except Exception as err:
+            raise HTTPException(502, f"Could not read the prescription: {err}")
+        card = _expert(request, "health").meds_card(who, rx)
+        return {"kind": "prescription", "card": st.store.add_card(card.to_dict()), "note": seen["note"]}
+    if seen["kind"] == "body_report" and seen.get("report"):
+        return {"kind": "body_report", "report": seen["report"], "note": seen["note"]}
+    return {"kind": "other", "note": seen["note"]}
 
 
 @api.post("/family/{key}/call")

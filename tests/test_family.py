@@ -33,7 +33,15 @@ def test_targets_formula_goal_reference_and_nutritionist_override():
     assert bulk["kcal"] == t["kcal"] + 300 and bulk["protein_g"] == 112
     assert P.targets({**base, "goal": "cut"})["kcal"] == t["kcal"] - 400
     assert P.targets({**base, "goal": "less_sugar"})["sugar_g"] < t["sugar_g"]
-    assert P.targets({"goal": "maintain"})["source"].startswith("ICMR") and P.targets({"goal": "maintain"})["kcal"] == 1885
+    assert "ICMR-NIN" in P.targets({"goal": "maintain"})["source"] and P.targets({"goal": "maintain"})["kcal"] == 1885
+    man = P.targets({"sex": "male", "goal": "bulk"})                              # no measurements: still per goal
+    assert man["kcal"] == 2110 + 300 and man["protein_g"] == round(65 * 1.6)
+    assert P.targets({"sex": "female", "goal": "cut"})["kcal"] == 1660 - 400
+    amma = P.targets({"age": 62, "sex": "female", "height_cm": 155, "weight_kg": 60, "goal": "maintain"})
+    assert amma["protein_g"] == 60 and "(60+)" in amma["source"]                  # 1.0 g/kg from 60
+    lean = P.targets({**base, "goal": "maintain", "body": {"body_fat_pct": 20}})
+    assert lean["kcal"] == round((370 + 21.6 * 56) * 1.2) and "Katch-McArdle" in lean["source"]
+    assert P.targets({**base, "goal": "maintain", "body": {"bmr_kcal": 1600}})["kcal"] == 1920
     assert "paediatrician" in P.targets({"age": 10, "height_cm": 140, "weight_kg": 30})["source"]
     own = P.targets({**base, "goal": "maintain", "override": {"kcal": 1700.0}})
     assert own["kcal"] == 1700 and own["source"] == "Set by your nutritionist" and own["protein_g"] == 56
@@ -46,7 +54,7 @@ def test_members_added_in_the_app_have_no_phone_and_are_never_called():
     assert dad["key"] == "nanna" and not dad["has_phone"] and P.keys(HH, store)[-1] == "nanna"
     m = P.save(store, HH, "nanna", {"age": 62, "sex": "male", "height_cm": 170, "weight_kg": 78, "goal": "less_sugar",
                                     "conditions": "sugar (diabetes), BP", "allergies": "peanuts"})
-    assert m["conditions"] == ["sugar (diabetes)", "BP"] and m["targets"]["source"].startswith("Formula")
+    assert m["conditions"] == ["sugar (diabetes)", "BP"] and "Mifflin" in m["targets"]["source"] and m["elder"]
     assert "never include" in P.describe(m) and "doctor told the family: sugar (diabetes), BP" in P.describe(m)
     with pytest.raises(ValueError):
         P.save(store, HH, "nanna", {"goal": "detox"})
@@ -132,6 +140,68 @@ def test_plan_prompt_has_each_eater_and_guests_and_plates_reach_the_cook():
     assert home.plate(P.member(HH, store, "nanna")) == "half rice, extra dal, tea without sugar"
 
 
+def test_age_checkups_and_elder_intake_watch_never_diagnose():
+    from app.experts.family import checkups
+    assert checkups.for_member({"age": 25}) == []
+    amma = [c["what"] for c in checkups.for_member({"age": 66, "sex": "female"})]
+    assert "Blood sugar check" in amma and "Cervical cancer screening" in amma and "Bone density (osteoporosis)" in amma
+    assert "Bone density (osteoporosis)" not in [c["what"] for c in checkups.for_member({"age": 66, "sex": "male"})]
+    assert all(c["source"] for c in checkups.for_member({"age": 66, "sex": "female"}))
+    store = Store(":memory:")
+    m = P.save(store, HH, "amma", {"age": 66, "sex": "female", "weight_kg": 58})
+    assert checkups.watch(store, m) == []                                       # nothing logged: no conclusion
+    now = time.time()
+    for back in (1, 2):
+        asyncio.run(pantry.log_meal(store, "1 idli", "", who="amma", estimate=meal(300, protein=6), now=now - back * 86400))
+    notes = checkups.watch(store, m, now=now)
+    assert len(notes) == 2 and "energy reference" in notes[0] and "good" not in " ".join(notes) + "bad"
+    assert checkups.watch(store, P.save(store, HH, "me", {"age": 30}), now=now) == []   # only for 60+
+    plan = HomeExpert(store, HH).call_plan(store.job(HomeExpert(store, HH).call("amma")))
+    assert "Amma is 66: speak slowly" in plan.instructions and "The family noticed" in plan.instructions
+    assert plan.max_minutes == 8
+
+
+def test_plate_guard_flags_from_the_members_own_notes_only():
+    from app.experts.family import guard
+
+    class Run:
+        def __init__(self):
+            self.input = None
+
+        async def __call__(self, agent, text, max_turns=1):
+            self.input = text
+            out = guard.Flags(flags=[guard.Flag(item="Haldiram Gulab Jamun 1 kg x1", who="Amma", note="doctor: sugar"),
+                                     guard.Flag(item="Milk x1", who="Stranger", note="x")])
+            return type("R", (), {"final_output": out})()
+    store = Store(":memory:")
+    plain = P.member(HH, store, "me")
+    run = Run()
+    assert asyncio.run(guard.check(["Milk x1"], [plain], runner=run)) == [] and run.input is None   # no notes, no call
+    amma = P.save(store, HH, "amma", {"goal": "less_sugar", "conditions": "sugar"})
+    flags = asyncio.run(guard.check(["Haldiram Gulab Jamun 1 kg x1", "Milk x1"], [amma, plain], runner=run))
+    assert flags == [{"item": "Haldiram Gulab Jamun 1 kg x1", "who": "Amma", "note": "doctor: sugar"}]
+    assert "Amma: less sugar; doctor: sugar" in run.input
+    assert guard.warnings(flags)[0].endswith("You decide before approving.")
+    plan = HomeExpert(store, HH).call_plan(store.job(HomeExpert(store, HH).call("amma")))
+    assert "Their own notes: less sugar, doctor: sugar" in plan.instructions and "never as your own opinion" in plan.instructions
+
+
+def test_portions_plus_minus_and_fit_to_target():
+    plan = {"days": [{"day": "Mon", "people": [{"who": "Nanna", "plate": "half rice"}], "meals": [
+        {"slot": "lunch", "dish": "Rice, dal", "parts": [
+            {"food": "Rice", "unit": "cup", "kcal": 200, "protein_g": 4, "carbs_g": 45, "fat_g": 0, "fibre_g": 1, "sugar_g": 0},
+            {"food": "Dal", "unit": "katori", "kcal": 150, "protein_g": 9, "carbs_g": 20, "fat_g": 3, "fibre_g": 4, "sugar_g": 0}],
+         "portions": [{"who": "Nanna", "qty": [1, 1]}, {"who": "Shiva", "qty": [2, 2]}]}]}], "ingredients": [], "notes": ""}
+    pl.fill(plan)
+    nanna = plan["days"][0]["people"][0]
+    assert nanna["kcal"] == 350 and nanna["protein_g"] == 13 and plan["days"][0]["kcal"] == 525    # average plate
+    pl.set_qty(plan, 0, 0, 0, "Nanna", 0.5)
+    assert plan["days"][0]["people"][0]["kcal"] == 250 and plan["days"][0]["people"][0]["plate"] == "half rice"
+    pl.fit(plan, 0, "Shiva", 1400)
+    assert plan["days"][0]["meals"][0]["portions"][1]["qty"] == [4.0, 4.0]
+    assert pl.plate_text(plan["days"][0], "Nanna") == "Rice 0.5 cup, Dal 1 katori"
+
+
 def test_store_is_safe_across_threads():
     from concurrent.futures import ThreadPoolExecutor
     store = Store(":memory:")
@@ -167,7 +237,7 @@ def test_family_api(client, monkeypatch):
     assert [m["key"] for m in fam["members"]] == ["me", "amma"] and "phone" not in fam["members"][0]
     assert c.post("/api/family", json={"name": "Nanna", "relation": "father"}).json()["has_phone"] is False
     r = c.put("/api/family/nanna", json={"age": 62, "height_cm": 170, "weight_kg": 78, "sex": "male", "goal": "less_sugar"})
-    assert r.status_code == 200 and r.json()["targets"]["source"].startswith("Formula")
+    assert r.status_code == 200 and "Mifflin" in r.json()["targets"]["source"]
     assert c.put("/api/family/nanna", json={"age": 500}).status_code == 400
     assert c.post("/api/family/nanna/reminders", json={"on": True}).status_code == 400     # no phone: never called
     assert c.post("/api/family/nanna/call").status_code == 400
@@ -180,7 +250,38 @@ def test_family_api(client, monkeypatch):
     assert c.post("/api/kitchen/meal", json={"text": "2 dosa", "who": "ghost"}).status_code == 404
     fam = c.get("/api/family").json()
     nanna = next(m for m in fam["members"] if m["key"] == "nanna")
-    assert nanna["today"]["total"]["kcal"] == 400 and nanna["today"]["targets"]["source"].startswith("Formula")
+    assert nanna["today"]["total"]["kcal"] == 400 and "Mifflin" in nanna["today"]["targets"]["source"]
     assert any(r["key"] == "nanna" and r["points"] == 5 for r in fam["board"]["rows"])
     assert c.post("/api/family/amma/call?via=browser").json()["job"]
     assert c.delete("/api/family/amma").status_code == 409 and c.delete("/api/family/nanna").json()["ok"]
+
+
+def test_scan_wearable_dose_and_plan_api(client, monkeypatch):
+    from app.experts.family import scan
+    c, store = client
+    photo = {"photo": ("x.jpg", b"jpg", "image/jpeg")}
+    seen = {"kind": "meal", "note": "a plate", "medicines": [], "report": None,
+            "meal": {"description": "2 rotis, 1 katori dal", "kcal": 420, "protein_g": 15, "carbs_g": 60, "fat_g": 10,
+                     "fibre_g": 8, "sugar_g": 0}}
+    monkeypatch.setattr(scan, "look", lambda image, mime, hint="": seen)
+    r = c.post("/api/scan", data={"who": "amma"}, files=photo).json()
+    assert r["kind"] == "meal" and r["entry"]["kcal"] == 420 and pantry.today(store, HH, "amma")["meals"][0]["text"] == "2 rotis, 1 katori dal"
+    M.add(store, "amma", "Tab. Glycomet 500", "1", ["night"])
+    seen.update(kind="medicine", medicines=[{"name_as_printed": "GLYCOMET 500 SR", "strength": "500 mg", "form": "tablet", "unclear": False}])
+    r = c.post("/api/scan", data={"who": "amma"}, files=photo).json()
+    assert r["matches"] == ["Tab. Glycomet 500"] and M.listed(store, "amma")[0]["name_as_written"] == "Tab. Glycomet 500"
+    seen.update(kind="body_report", report={"date": "2026-11-20", "weight_kg": 58, "height_cm": None, "body_fat_pct": 31,
+                                           "skeletal_muscle_kg": 20, "fat_mass_kg": 18, "bmr_kcal": 1210, "visceral_fat_level": 8})
+    r = c.post("/api/scan", data={"who": "amma"}, files=photo).json()
+    assert r["kind"] == "body_report" and P.profile(store, "amma").get("body") is None        # saved only on confirm
+    v = c.put("/api/family/amma", json={"weight_kg": 58, "body": r["report"]}).json()
+    assert v["body"]["bmr_kcal"] == 1210 and "BMR from the body composition report" in v["targets"]["source"]
+    assert c.post("/api/family/amma/dose", json={"slot": "night", "taken": "yes"}).json()["doses"][0]["taken"] == "yes"
+    assert c.post("/api/family/amma/dose", json={"slot": "noon"}).status_code == 400
+    base = c.get("/api/family").json()["members"][1]["today"]["targets"]["kcal"]
+    assert c.post("/api/activity/amma", json={"steps": 8000, "active_kcal": 250, "source": "Apple Watch"}).json()["ok"]
+    amma = c.get("/api/family").json()["members"][1]
+    assert amma["activity"]["steps"] == 8000 and amma["today"]["targets"]["kcal"] == base + 250
+    assert "Apple Watch" in amma["today"]["targets"]["source"]
+    assert next(r for r in board.board(store, HH)["rows"] if r["key"] == "amma")["breakdown"]["steps"] == 5
+    assert c.post("/api/kitchen/mealplan/fit", json={"day": 0, "who": "Amma"}).status_code == 409   # no plan yet

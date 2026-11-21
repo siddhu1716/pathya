@@ -106,7 +106,9 @@ class KitchenExpert(Expert):
         menu = "; ".join(f"{m['slot']}: {m['dish']}" for m in pay["menu"].get("meals", [])) or "not set"
         language = lang.of(self.hh, p)
         greeting = lang.greet(language, "calling", user, p["name"])
-        plates = "; ".join(f"{x['who']}: {x['plate']}" for x in pay["menu"].get("people") or []) or "the same for everyone"
+        plates = "; ".join(f"{x['who']}: " + (pl.plate_text(pay["menu"], x["who"]) or x.get("plate", "")) +
+                           (f" ({x['plate']})" if x.get("plate") and pl.plate_text(pay["menu"], x["who"]) else "")
+                           for x in pay["menu"].get("people") or []) or "the same for everyone"
         plan = CallPlan(MENU_CALL.format(who=p["name"], user=user, greeting=greeting, speak=lang.speak(language),
                                          menu=menu, plates=plates), greeting, max_minutes=4, language=language)
 
@@ -159,7 +161,22 @@ class KitchenExpert(Expert):
                     payload={"text": verdict.text, "safety": verdict.status,
                              "wa": wa_link(who["phone"], verdict.text) if who.get("phone") else None})
 
-    async def handle(self, text, ref=None):
+    async def handle(self, text, ref=None, who=None):
+        """A list -> a cart card (Instamart, else Zepto, else the list). Items that clash with a family member's own
+        notes (goal, allergies, what the doctor said) are flagged on the card; the human who taps decides."""
+        card = await self._cart(text, ref)
+        if card.kind == "order" and card.lines:
+            try:
+                from app.experts.family import guard, profiles as P
+                members = [P.member(self.hh, self.store, who)] if who else P.members(self.hh, self.store)
+                flags = await guard.check(card.lines, members)
+                card.warnings[:0] = guard.warnings(flags)
+                card.payload["flags"] = flags
+            except Exception as err:                          # the guard never blocks a cart
+                self.store.log(self.name, ref or "cart", f"plate guard skipped: {err}")
+        return card
+
+    async def _cart(self, text, ref=None):
         advice = [str(f["value"]) for f in self.store.facts(prefix="advice:")]
         advice_note = ("Doctor's advice in this home (use it only to choose between products, "
                        "for example low-sodium salt; never add items because of it): " + "; ".join(advice)) if advice else ""

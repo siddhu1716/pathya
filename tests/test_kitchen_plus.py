@@ -115,7 +115,7 @@ def test_kitchen_api(client):
     c, st = client
     pl.remember_order(st, ["Milk 1 Ltr x2 - Rs 122"], "swiggy")
     ov = c.get("/api/kitchen/overview").json()
-    assert ov["usuals"][0]["name"] == "Milk 1 Ltr" and ov["cook"] == "Lakshmi garu" and ov["targets"]["protein_g"] == 50
+    assert ov["usuals"][0]["name"] == "Milk 1 Ltr" and ov["cook"] == "Lakshmi garu" and ov["targets"]["source"].startswith("average of")
     r = c.post("/api/kitchen/mealplan", json={"days": 9}).json()
     assert st.card(r["card"])["card"]["kind"] == "plan" and c.get("/api/kitchen/overview").json()["plan"]["for_days"] == 7
     assert c.post("/api/kitchen/nutrition/share").status_code == 409

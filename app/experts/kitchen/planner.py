@@ -52,28 +52,37 @@ def usuals(store, limit=12):
 
 
 # ---------- meal plan ----------
+class Part(BaseModel):
+    food: str
+    unit: str
+    kcal: int
+    protein_g: float
+    carbs_g: float
+    fat_g: float
+    fibre_g: float
+    sugar_g: float
+
+
+class Portion(BaseModel):
+    who: str
+    qty: list[float]
+
+
 class Meal(BaseModel):
     slot: str
     dish: str
+    parts: list[Part]
+    portions: list[Portion]
 
 
 class PersonDay(BaseModel):
     who: str
     plate: str
-    kcal: int
-    protein_g: int
-    fibre_g: int
-    sugar_g: int
 
 
 class Day(BaseModel):
     day: str
     meals: list[Meal]
-    kcal: int
-    protein_g: int
-    carbs_g: int
-    fat_g: int
-    fibre_g: int
     people: list[PersonDay]
 
 
@@ -102,9 +111,11 @@ Doctor's written advice in this home (use it ONLY to choose between dishes, e.g.
 Recently bought (assume still at home unless perishable and older than 3 days): {bought}
 Family's notes: {notes}
 Plan {days} day(s) of breakfast, lunch and dinner the cook can make (simple, everyday dishes; reuse ingredients).
-For each day give: the family menu; the ESTIMATED nutrition of the standard plate (kcal, protein, carbs, fat, fibre in
-grams); and in people, one entry per eater (who = their name exactly as above) with a one-line plate note and their
-ESTIMATED kcal, protein, fibre and added sugar (grams) for the day, aiming close to their own targets. Guests eat the
+For each meal give: the dish; its parts, each a food with a household unit (cup, katori, roti, dosa, idli, piece,
+glass, tbsp) and the ESTIMATED nutrition of ONE unit (sugar_g = added sugar); and portions: one entry per eater
+(who = their name exactly as above) with the quantity of every part, in the same order (halves allowed, 0 = skip),
+chosen so each person's whole day lands close to their own targets and fits their notes. In people, one entry per eater
+with a one-line plate note for the day (for example "half rice, extra dal, tea without sugar"). Guests eat the
 standard plate.
 List the ingredients for the whole plan for {people} people with practical shop quantities (e.g. "1 kg", "500 g",
 "2 litres"); set have_it=true only when it is clearly in the recently bought list. Keep notes to one or two lines."""
@@ -128,7 +139,68 @@ async def meal_plan(hh, store, days=3, notes="", eaters=None, guests=0):
                   instructions=plan_prompt(hh, store, days, notes, eaters, guests),
                   **({"model": MODEL} if MODEL else {}))
     run = await Runner.run(agent, f"Plan {days} days.", max_turns=1)
-    return run.final_output.model_dump()
+    return fill(run.final_output.model_dump())
+
+
+NUTRIENTS = ("kcal", "protein_g", "carbs_g", "fat_g", "fibre_g", "sugar_g")
+
+
+def person_day(day, who):
+    """One person's day, from the parts x their quantities (so +/- changes the numbers exactly)."""
+    total = dict.fromkeys(NUTRIENTS, 0.0)
+    for meal in day.get("meals", []):
+        portion = next((p for p in meal.get("portions") or [] if p["who"] == who), None)
+        for part, q in zip(meal.get("parts") or [], (portion or {}).get("qty") or []):
+            for k in NUTRIENTS:
+                total[k] += part.get(k, 0) * q
+    return {k: round(v) for k, v in total.items()}
+
+
+def fill(plan):
+    """Totals per person per day (people[]) and the average plate (day kcal, protein_g ...) from the quantities."""
+    for day in plan.get("days", []):
+        names = list(dict.fromkeys(p["who"] for m in day.get("meals", []) for p in m.get("portions") or []))
+        if not names:
+            continue
+        notes = {p["who"]: p.get("plate", "") for p in day.get("people") or []}
+        day["people"] = [{"who": n, "plate": notes.get(n, ""), **person_day(day, n)} for n in names]
+        for k in NUTRIENTS:
+            day[k] = round(sum(p[k] for p in day["people"]) / len(day["people"]))
+    return plan
+
+
+def set_qty(plan, d, m, part, who, qty):
+    meal = plan["days"][d]["meals"][m]
+    portion = next((p for p in meal["portions"] if p["who"] == who), None)
+    if portion is None:
+        portion = {"who": who, "qty": [0.0] * len(meal["parts"])}
+        meal["portions"].append(portion)
+    portion["qty"] += [0.0] * (len(meal["parts"]) - len(portion["qty"]))
+    portion["qty"][part] = max(0.0, min(20.0, round(qty * 4) / 4))
+    return fill(plan)
+
+
+def fit(plan, d, who, kcal):
+    """Scale one person's quantities for one day so their energy lands near their target (halves, nothing below 0)."""
+    now = person_day(plan["days"][d], who)["kcal"]
+    if not now or not kcal:
+        return plan
+    factor = kcal / now
+    for meal in plan["days"][d]["meals"]:
+        for p in meal.get("portions") or []:
+            if p["who"] == who:
+                p["qty"] = [max(0.0, round(q * factor * 2) / 2) if q else 0.0 for q in p["qty"]]
+    return fill(plan)
+
+
+def plate_text(day, who):
+    """'rice 1.5 cup, dal 1 katori ...' for the cook."""
+    out = []
+    for meal in day.get("meals", []):
+        portion = next((p for p in meal.get("portions") or [] if p["who"] == who), None)
+        if portion:
+            out += [f"{part['food']} {q:g} {part['unit']}" for part, q in zip(meal["parts"], portion["qty"]) if q]
+    return ", ".join(out)
 
 
 # ---------- nutrition ----------

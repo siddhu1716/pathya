@@ -70,7 +70,7 @@ def test_my_number_gets_the_home_line_in_telugu_and_a_cart_after(monkeypatch):
     app, store, kitchen = env()
     seen = []
 
-    async def handle(text, ref=None):
+    async def handle(text, ref=None, who=None):
         seen.append(text)
         return Card("kitchen", "order", "Swiggy Instamart cart", [text])
     kitchen.handle = handle
