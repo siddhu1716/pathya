@@ -5,6 +5,7 @@ import asyncio, json, os, re, time
 
 from agents import Agent, Runner
 from agents.mcp import MCPServerStdio, create_static_tool_filter
+from pydantic import BaseModel
 
 IM_URL = os.getenv("INSTAMART_MCP_URL", "https://mcp.swiggy.com/im")
 MODEL = os.getenv("OPENAI_MODEL")                # empty = SDK default
@@ -74,13 +75,20 @@ Delivery addressId: {aid}. Keep the total under Rs {cap:.0f}.
 3. Choose in-stock variations closest to the size asked for.
 4. update_cart REPLACES the whole cart: send every item in ONE call with selectedAddressId
    and items [{{spinId, skuId, quantity}}].
-5. Call get_cart, then reply in one or two lines: anything missing or substituted."""
+5. Call get_cart, then answer with `note`: one or two lines on anything substituted or not found, and
+   `missing`: every requested item that is NOT in the cart (not found or out of stock), in the family's words."""
+
+
+class CartResult(BaseModel):
+    note: str
+    missing: list[str]
 
 
 async def build_cart(agent_im, shopping_list, address_id):
+    """Returns CartResult(note, missing). The model never sees checkout or payment tools."""
     agent = Agent(name="Kitchen cart builder",
                   instructions=RULES.format(aid=address_id, cap=CAP),
-                  mcp_servers=[agent_im],
+                  mcp_servers=[agent_im], output_type=CartResult,
                   **({"model": MODEL} if MODEL else {}))
     run = await Runner.run(agent, shopping_list, max_turns=25)
     return run.final_output

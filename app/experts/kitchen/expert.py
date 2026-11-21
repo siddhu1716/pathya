@@ -1,9 +1,11 @@
 """Kitchen Expert: a list (from a call, a voice note or typing) -> Swiggy Instamart cart
--> one human tap -> order. Ordering rules live in swiggy.py (tested); this file wires them in."""
+-> one human tap -> order. Items Instamart can't supply get a separate Zepto card (availability, not price).
+Ordering rules live in swiggy.py and zepto.py (tested); this file wires them in."""
 import os
 
 from app.experts.base import CallPlan, Card, Expert
 from app.experts.kitchen import swiggy as sw
+from app.experts.kitchen import zepto as zp
 
 LIST_CALL = """You are QuickPick, an AI assistant, calling {who} for {user}'s family to take this week's grocery list.
 Your first sentence: "{greeting}" After it, speak {lang}, simply and politely (mixing in common English words
@@ -33,8 +35,8 @@ class KitchenExpert(Expert):
     handles = "groceries, milk, vegetables, kitchen supplies, the weekly list, reorders, meal-plan ingredients"
     call_kinds = {"list"}
 
-    def __init__(self, store, household, agent_im, ops):
-        self.store, self.hh, self.agent_im, self.ops = store, household, agent_im, ops
+    def __init__(self, store, household, agent_im, ops, zepto=None):
+        self.store, self.hh, self.agent_im, self.ops, self.zepto = store, household, agent_im, ops, zepto
 
     def weekly_call(self, person, run_at=None):
         p = self.hh["people"][person]
@@ -67,14 +69,43 @@ class KitchenExpert(Expert):
 
     async def handle(self, text, ref=None):
         advice = [str(f["value"]) for f in self.store.facts(prefix="advice:")]
-        if advice:
-            text += ("\nDoctor's advice in this home (use it only to choose between products, "
-                     "for example low-sodium salt; never add items because of it): " + "; ".join(advice))
+        advice_note = ("Doctor's advice in this home (use it only to choose between products, "
+                       "for example low-sodium salt; never add items because of it): " + "; ".join(advice)) if advice else ""
+        if advice_note:
+            text += "\n" + advice_note
         addr = await sw.pick_address(self.ops, self.hh.get("address_hint"))
-        note = await sw.build_cart(self.agent_im, text, addr["id"])
+        result = await sw.build_cart(self.agent_im, text, addr["id"])
+        note, missing = (result.note, list(result.missing)) if hasattr(result, "note") else (str(result), [])
         cart, _ = await sw.call(self.ops, "get_cart")
         pay, _ = await sw.call(self.ops, "get_payment_options")
-        return self.card(cart, pay, addr, note, ref)
+        missing += [i.get("itemName") for i in cart.get("unserviceableItems") or [] if i.get("itemName")]
+        card = self.card(cart, pay, addr, note, ref)
+        if missing and self.zepto is not None:
+            card.warnings.append(await self.zepto_backup(missing, advice_note, ref))
+        return card
+
+    async def zepto_backup(self, missing, advice_note="", ref=None):
+        """Items Instamart could not supply -> a separate Zepto card. Availability only, never a price comparison."""
+        try:
+            addr, quote, not_found = await zp.build(self.zepto, missing, self.hh.get("address_hint"), advice_note)
+        except Exception as err:
+            return f"Not on Instamart: {', '.join(missing)}. Zepto backup failed: {err}"
+        if not quote:
+            return f"Not on Instamart or Zepto: {', '.join(missing)}."
+        lines = [f"{i.get('name')} x{i.get('quantity')} - Rs {(i.get('price') or 0) / 100:.0f}"
+                 for i in quote["cart"].get("items", [])]
+        warnings = [f"Not found on Zepto either: {', '.join(not_found)}"] if not_found else []
+        if not quote["cod"]:
+            warnings.append("Zepto did not offer cash on delivery for this cart.")
+        total = f"₹{quote['total']:.0f}"
+        self.store.add_card(Card(self.name, "order", "Zepto cart (items Instamart didn't have)", lines,
+                                 total=total, address=addr.get("addressLine"),
+                                 question="Do you want to proceed with placing this order to this address?",
+                                 choices=[{"id": "COD", "label": "Cash on delivery"}] if quote["cod"] else [],
+                                 warnings=warnings,
+                                 payload={"store": "zepto", "address_id": addr["id"],
+                                          "approved_total": quote["total"], "ref": ref}).to_dict())
+        return f"Not on Instamart: {', '.join(missing)}. A separate Zepto card is ready for them."
 
     def card(self, cart, pay, addr, note="", ref=None):
         total = cart["billBreakdown"]["toPay"]["value"]
@@ -104,6 +135,11 @@ class KitchenExpert(Expert):
         if dry_run():
             return {"ok": True, "dry_run": True,
                     "message": f"DRY RUN: would place {card['total']} by {'UPI' if upi_app else 'cash on delivery'}."}
+        if p.get("store") == "zepto":
+            if choice != "COD":
+                raise RuntimeError("Zepto orders here are cash on delivery only.")
+            order, msg = await zp.place(self.zepto, p["address_id"], p["approved_total"])
+            return {"ok": True, "message": msg.strip(), "order": order}
         order, msg = await sw.place(self.ops, p["address_id"], p["approved_total"], upi_app)
         out = {"ok": True, "message": for_people(msg), "order": order, "cancel": sw.CANCEL}
         if order.get("status") == "PENDING_PAYMENT":

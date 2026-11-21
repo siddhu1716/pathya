@@ -17,10 +17,12 @@ async def main(shopping):
     async with bridge("im-agent", AGENT_TOOLS) as agent_im, bridge("im-ops") as ops:
         addr = await pick_address(ops)
         print("Agent is building the cart...")
-        note = await build_cart(agent_im, shopping, addr["id"])
+        result = await build_cart(agent_im, shopping, addr["id"])
         cart, _ = await call(ops, "get_cart")
         pay, _ = await call(ops, "get_payment_options")
-        print(summary(cart, addr, pay), "\nAgent:", note)
+        print(summary(cart, addr, pay), "\nAgent:", result.note)
+        if result.missing:
+            print("Not found on Instamart:", ", ".join(result.missing))
         if input("Do you want to proceed with placing this order to this address? (yes/no) ").strip().lower() not in YES:
             return print("Not placed.")
         apps = ((pay.get("platforms") or {}).get("mobile") or {}).get("methods", [])

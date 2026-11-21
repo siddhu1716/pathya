@@ -9,7 +9,7 @@ QuickPick Experts phone a family's people (the cook, Amma) and their clinic, tur
 4. Before checkout, the card shows the cart, "To pay", "Your order will be delivered to: <address>", the payment options and the question "Do you want to proceed with placing this order to this address?".
 5. `update_cart` replaces the whole cart: one call with every item.
 6. `DRY_RUN=1` is the default. Never change the default; only the human sets `DRY_RUN=0`.
-7. No scraping, no price comparison, no benchmarking of Swiggy or Zepto.
+7. No scraping, no price comparison, no benchmarking of Swiggy or Zepto. Zepto is only a backup for items Instamart could not supply: the model gets no Zepto tools (code searches; the model only picks from shown results, checked in code), and only `zepto.place()` may call `create_order`, from a tapped card, never retried.
 8. Phone calls: the first sentence says it is an AI and who it calls for; never read IDs aloud; read back at most 3 items at a time; every call has a time limit; only call numbers in household.yaml.
 9. Health: never diagnose; never suggest, start, stop or change medicines or doses; never say a reading is good or bad. Keep `fits()` and the booking tools' refusals. Nothing is scheduled from a prescription until the human confirms. Every health text passes `safety.check()`.
 10. Secrets only in `.env`. Never commit `.env`, `quickpick.db`, recordings or health data.

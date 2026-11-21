@@ -468,8 +468,16 @@ async def lifespan(app: FastAPI):
         except Exception as err:                            # the app still runs; Kitchen routes return 503
             log.exception("Swiggy connection failed")
             store.log("app", "swiggy", f"Swiggy not connected: {err}")
+        zepto = None
+        if os.getenv("ZEPTO_BACKUP", "1") == "1":
+            from app.experts.kitchen import zepto as zp
+            try:
+                zepto = await stack.enter_async_context(zp.bridge())
+                store.log("app", "zepto", "Zepto connected (backup for items Instamart can't supply)")
+            except Exception as err:
+                store.log("app", "zepto", f"Zepto not connected: {err}")
         REGISTRY.clear()                                    # uvicorn --reload re-runs the lifespan
-        register(KitchenExpert(store, hh, agent_im, ops))
+        register(KitchenExpert(store, hh, agent_im, ops, zepto))
         register(HealthExpert(store, hh))
         app.state.store, app.state.household, app.state.experts = store, hh, REGISTRY
         if twilio_ready():
