@@ -4,6 +4,7 @@ Run: uvicorn app.main:app --reload --port 8000   (UI dev server: cd web && npm r
 import asyncio
 import logging
 import os
+import re
 import time
 from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
@@ -33,16 +34,25 @@ def load_household(path=None):
     return yaml.safe_load(path.read_text(encoding="utf-8"))
 
 
-def make_dialer(store):
-    """Real phone calls when Twilio is configured; otherwise the call rings in the browser (/call/<job_id>)."""
+def twilio_ready():
+    """CALL_MODE=twilio and real-looking credentials (not the .env.example placeholders)."""
     sid, token = os.getenv("TWILIO_ACCOUNT_SID", ""), os.getenv("TWILIO_AUTH_TOKEN", "")
-    if sid.startswith("AC") and token and os.getenv("TWILIO_FROM") and os.getenv("PUBLIC_HOST"):
+    return (os.getenv("CALL_MODE", "browser") == "twilio" and re.fullmatch(r"AC[0-9a-fA-F]{32}", sid)
+            and len(token) >= 32 and re.fullmatch(r"\+\d{8,15}", os.getenv("TWILIO_FROM", ""))
+            and "." in os.getenv("PUBLIC_HOST", "") and "xxxx" not in os.getenv("PUBLIC_HOST", ""))
+
+
+def make_dialer(store):
+    """Real phone calls only with CALL_MODE=twilio and valid credentials; otherwise calls ring in the browser."""
+    if twilio_ready():
         from twilio.rest import Client
         from app.core.caller import make_dial
-        return make_dial(Client(sid, token))
+        return make_dial(Client(os.environ["TWILIO_ACCOUNT_SID"], os.environ["TWILIO_AUTH_TOKEN"]))
+    if os.getenv("CALL_MODE") == "twilio":
+        store.log("caller", "setup", "CALL_MODE=twilio but the Twilio settings in .env are incomplete; using browser calls")
 
     def ring_in_browser(to, job_id):
-        store.log("caller", job_id, "ringing in the browser (Twilio not configured)")
+        store.log("caller", job_id, "ringing in the browser (/call/<job>)")
         return "browser"
     return ring_in_browser
 
@@ -98,7 +108,8 @@ def state(request: Request):
     waiting = sorted(store.cards("waiting"), key=lambda c: c["card"]["kind"] != "alert")   # urgent cards on top
     called = {f["key"][5:] for f in store.facts(prefix="call:")}
     ringing = [j for j in store.recent_jobs(time.time() - RINGING_WINDOW)
-               if (j.get("result") or {}).get("call_sid") == "browser" and j["id"] not in called]
+               if isinstance(j.get("result"), dict) and j["result"].get("call_sid") == "browser"
+               and j["id"] not in called]
     return {
         "dry_run": os.getenv("DRY_RUN", "1") == "1",
         "swiggy": getattr(st.experts.get("kitchen"), "ops", None) is not None,
@@ -251,6 +262,107 @@ def run_now(jid: str, request: Request):
     return {"ok": True}
 
 
+# ---------- browser calls (OpenAI Realtime over WebRTC; the phone line comes later) ----------
+class ToolCall(BaseModel):
+    name: str
+    arguments: str = "{}"
+
+
+class CallEnd(BaseModel):
+    transcript: list[dict] = []
+
+
+def _call_job(request, jid):
+    job = _st(request).store.job(jid)
+    if not job:
+        raise HTTPException(404, "No such call.")
+    expert = _st(request).experts.get(job["expert"])
+    if not expert or job["kind"] not in expert.call_kinds:
+        raise HTTPException(400, "That job is not a phone call.")
+    return job, expert
+
+
+def _live(request, jid):
+    call = _st(request).calls.get(jid)
+    if not call:
+        raise HTTPException(409, "This call has not been answered.")
+    return call
+
+
+@api.get("/calls/{jid}")
+def call_info(jid: str, request: Request):
+    job, expert = _call_job(request, jid)
+    hh = _st(request).household
+    who = hh["people"].get(job["person"]) or hh["clinics"].get(job["person"]) or {}
+    done = bool(_st(request).store.facts(prefix=f"call:{jid}"))
+    return {"id": jid, "kind": job["kind"], "expert": expert.title, "done": done,
+            "who": who.get("name") or who.get("clinic") or job["person"], "user": hh["user"]["name"]}
+
+
+@api.post("/calls/{jid}/sdp")
+async def call_sdp(jid: str, request: Request):
+    """The browser 'answers': its SDP offer becomes a Realtime session running this job's CallPlan."""
+    from app.core.browser_call import Call, answer_sdp, session_config
+    st = _st(request)
+    job, expert = _call_job(request, jid)
+    if st.store.facts(prefix=f"call:{jid}"):
+        raise HTTPException(409, "This call already ended.")
+    offer = (await request.body()).decode()
+    if not offer.strip():
+        raise HTTPException(400, "An SDP offer is required.")
+    plan = expert.call_plan(job)
+    try:
+        answer = await answer_sdp(offer, session_config(plan))
+    except Exception as err:
+        st.store.log(expert.name, jid, f"call could not start: {err}")
+        raise HTTPException(502, str(err))
+    st.calls[jid] = Call(job, expert, plan)
+    st.store.log(expert.name, jid, f"call answered (browser), limit {plan.max_minutes} min")
+    return PlainTextResponse(answer, media_type="application/sdp")
+
+
+@api.get("/calls/{jid}/greeting")
+def call_greeting(jid: str, request: Request):
+    call = _live(request, jid)
+    return {"greeting": call.plan.greeting, "max_minutes": call.plan.max_minutes}
+
+
+@api.post("/calls/{jid}/tool")
+async def call_tool(jid: str, body: ToolCall, request: Request):
+    call = _live(request, jid)
+    out = await call.run_tool(body.name, body.arguments)
+    _st(request).store.log(call.expert.name, jid, f"{body.name} -> {out}")   # refusals show on the timeline
+    return {"output": out, "end": body.name == "end_call"}
+
+
+async def _after_call(st, call, jid):
+    try:
+        card = await call.expert.after_call(call.job, call.plan.saved)
+        if card:
+            st.store.add_card(card.to_dict())
+        else:
+            st.store.log(call.expert.name, jid, "call ended without anything to approve")
+    except Exception as err:
+        st.store.log(call.expert.name, jid, f"after the call failed: {err}")
+
+
+@api.post("/calls/{jid}/end")
+async def call_end(jid: str, body: CallEnd, request: Request):
+    st = _st(request)
+    call = _live(request, jid)
+    if call.ended:
+        return {"ok": True}
+    call.ended = True
+    secs = int(time.time() - call.started)
+    st.store.remember(call.job["person"], f"call:{jid}",
+                      {"transcript": body.transcript[-200:], "saved": call.plan.saved, "seconds": secs}, "browser call")
+    st.store.log(call.expert.name, jid, f"call ended after {secs} s")
+    st.tasks.add(t := asyncio.create_task(_after_call(st, call, jid)))     # e.g. building the cart takes ~30 s
+    t.add_done_callback(st.tasks.discard)
+    st.calls.pop(jid, None)
+    return {"ok": True}
+
+
 # ---------- app ----------
 def build_app(lifespan=None) -> FastAPI:
     app = FastAPI(title="QuickPick Experts", lifespan=lifespan)
@@ -278,6 +390,7 @@ def build_app(lifespan=None) -> FastAPI:
         return FileResponse(dist / "index.html")
 
     app.state.tasks = set()
+    app.state.calls = {}
     return app
 
 

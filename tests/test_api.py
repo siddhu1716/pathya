@@ -1,4 +1,5 @@
 """API checks for app/main.py with stand-in Experts (no Swiggy, no calls, no real orders)."""
+import json
 import os
 import sys
 import time
@@ -109,11 +110,30 @@ def test_state_alerts_first_and_browser_ringing(env):
     jid = store.add_job("kitchen", "list", "lakshmi", {"person": "lakshmi"}, time.time())
     store.start_job(jid)
     store.end_job(jid, True, {"call_sid": "browser"})
+    bad = store.add_job("kitchen", "list", "amma", {"person": "amma"}, time.time())   # failed jobs store a string
+    store.start_job(bad)
+    store.end_job(bad, False, "dial failed")
     s = client.get("/api/state").json()
     assert s["cards"][0]["card"]["kind"] == "alert" and s["dry_run"] in (True, False)
     assert [j["id"] for j in s["ringing"]] == [jid]
     store.remember("lakshmi", f"call:{jid}", {"transcript": []}, "call")
     assert client.get("/api/state").json()["ringing"] == []
+
+
+def test_twilio_only_when_opted_in_with_real_settings(monkeypatch):
+    from app.main import twilio_ready
+    example = {"TWILIO_ACCOUNT_SID": "AC...", "TWILIO_AUTH_TOKEN": "...", "TWILIO_FROM": "+1...",
+               "PUBLIC_HOST": "xxxx.ngrok-free.app"}
+    real = {"TWILIO_ACCOUNT_SID": "AC" + "a" * 32, "TWILIO_AUTH_TOKEN": "b" * 32, "TWILIO_FROM": "+15550001111",
+            "PUBLIC_HOST": "abcd.ngrok-free.app"}
+    for k, v in {**example, "CALL_MODE": "twilio"}.items():
+        monkeypatch.setenv(k, v)
+    assert not twilio_ready()                                   # .env.example placeholders never dial
+    for k, v in real.items():
+        monkeypatch.setenv(k, v)
+    assert twilio_ready()
+    monkeypatch.setenv("CALL_MODE", "browser")
+    assert not twilio_ready()
 
 
 def test_kitchen_503_when_swiggy_not_connected(env):
@@ -133,3 +153,42 @@ def test_health_book_and_ics(env):
     r = client.get(f"/api/cards/{aid}/ics")
     assert r.status_code == 200 and r.headers["content-type"].startswith("text/calendar")
     assert client.get("/api/nope").status_code == 404
+
+
+def test_browser_call_runs_expert_tools_and_makes_card(env, monkeypatch):
+    from datetime import datetime, timedelta
+    import app.core.browser_call as bc
+    client, store, _ = env
+    seen = {}
+
+    async def fake_answer(offer, config, **kw):
+        seen["config"] = config
+        return "v=0 answer"
+    monkeypatch.setattr(bc, "answer_sdp", fake_answer)
+
+    base = (datetime.now() + timedelta(days=2)).replace(hour=0, minute=0, second=0, microsecond=0)
+    jid = client.post("/api/health/book", json={
+        "patient": "amma", "clinic": "rao", "window_start": base.isoformat(),
+        "window_end": (base + timedelta(days=3)).isoformat(), "part": "morning", "reason": "BP review"}).json()["job"]
+    assert client.post(f"/api/calls/{jid}/tool", json={"name": "end_call"}).status_code == 409   # not answered yet
+    assert client.post(f"/api/calls/{jid}/sdp", content="v=0 offer",
+                       headers={"Content-Type": "application/sdp"}).text == "v=0 answer"
+    cfg = seen["config"]
+    assert "AI assistant" in cfg["instructions"] and {t["name"] for t in cfg["tools"]} >= {"book_slot", "end_call"}
+    assert "Hello, I am QuickPick" in client.get(f"/api/calls/{jid}/greeting").json()["greeting"]
+
+    late = (base + timedelta(days=1)).replace(hour=16).strftime("%Y-%m-%dT%H:%M")
+    good = (base + timedelta(days=1)).replace(hour=10, minute=30).strftime("%Y-%m-%dT%H:%M")
+    tool = lambda name, **a: client.post(f"/api/calls/{jid}/tool", json={"name": name, "arguments": json.dumps(a)}).json()
+    assert tool("book_slot", slot=late, doctor="", fee="", bring="")["output"].startswith("Refused")
+    assert any("Refused" in e["what"] for e in store.timeline(ref=jid))          # visible on the timeline
+    assert tool("book_slot", slot=good, doctor="Dr. Rao", fee="Rs 500", bring="reports")["output"].startswith("Booked")
+    assert tool("end_call", summary="Booked 10:30")["end"] is True
+    assert client.post(f"/api/calls/{jid}/end", json={"transcript": [{"role": "ai", "text": "hi"}]}).json()["ok"]
+    for _ in range(50):
+        if any(c["card"]["kind"] == "booking" for c in store.cards()):
+            break
+        time.sleep(0.05)
+    assert any(c["card"]["kind"] == "booking" for c in store.cards())
+    assert store.facts("rao", f"call:{jid}")[0]["value"]["transcript"][0]["text"] == "hi"
+    assert client.post(f"/api/calls/{jid}/sdp", content="v=0 offer").status_code == 409     # one answer per call
