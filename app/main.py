@@ -20,6 +20,7 @@ from fastapi.responses import FileResponse, PlainTextResponse
 from pydantic import BaseModel
 
 from app.core import jobs as J
+from app.core.lang import default as lang_default, of as lang_of
 from app.core.store import Store
 from app.experts.base import REGISTRY, register
 
@@ -117,7 +118,9 @@ def state(request: Request):
         "phone_number": os.getenv("TWILIO_FROM") if st.twilio is not None else None,
         "exotel": len(os.getenv("EXOTEL_STREAM_SECRET", "")) >= 16,
         "user": hh["user"]["name"],
-        "people": [{"key": k, "name": v["name"], "role": v.get("role", ""), "language": v.get("language", "")}
+        "language": lang_default(hh),
+        "daily_call": getattr(st.experts.get("home"), "daily_hour", lambda: None)(),
+        "people": [{"key": k, "name": v["name"], "role": v.get("role", ""), "language": lang_of(hh, v)}
                    for k, v in hh["people"].items()],
         "clinics": [{"key": k, "doctor": v["doctor"], "clinic": v["clinic"]} for k, v in hh["clinics"].items()],
         "cards": waiting,
@@ -132,6 +135,8 @@ def state(request: Request):
 
 
 def _who(hh, key):
+    if key == "me":
+        return hh["user"]["name"]
     p = hh["people"].get(key) or hh["clinics"].get(key) or {}
     return p.get("name") or p.get("clinic") or ("Unknown caller" if key == "caller" else key)
 
@@ -217,12 +222,14 @@ class PlanAsk(BaseModel):
 
 @api.get("/kitchen/overview")
 def kitchen_overview(request: Request):
+    from app.experts.kitchen import pantry
     from app.experts.kitchen import planner as pl
     st = _st(request)
     fact = lambda key: next((f["value"] for f in st.store.facts("home", key)), None)
     cook = st.experts["kitchen"].cook() if "kitchen" in st.experts else None
     k = st.household.get("kitchen") or {}
     return {"usuals": pl.usuals(st.store), "plan": fact("mealplan"), "nutrition": fact("nutrition"),
+            "pantry": pantry.items(st.store), "today": pantry.today(st.store, st.household),
             "targets": pl.targets(st.household), "nutritionist": (st.household.get("nutritionist") or {}).get("name"),
             "cook": st.household["people"][cook]["name"] if cook else None,
             "prefs": {"people": k.get("people", len(st.household["people"]) + 1), "diet": k.get("diet", "vegetarian"),
@@ -278,6 +285,66 @@ def kitchen_nutrition_share(request: Request):
     return {"card": st.store.add_card(card.to_dict())}
 
 
+class Used(BaseModel):
+    key: str
+
+
+@api.post("/kitchen/pantry/used")
+def pantry_used(body: Used, request: Request):
+    """'This is finished': off the shelf (it then shows up for reordering under the usuals)."""
+    if not _st(request).store.forget("home", f"pantry:{body.key}"):
+        raise HTTPException(404, "Not on the shelf.")
+    return {"ok": True}
+
+
+class Meal(BaseModel):
+    text: str
+    meal: str = ""
+
+
+@api.post("/kitchen/meal")
+async def log_meal(body: Meal, request: Request):
+    from app.experts.kitchen import pantry
+    if not body.text.strip():
+        raise HTTPException(400, "Say what you ate.")
+    try:
+        return await pantry.log_meal(_st(request).store, body.text.strip()[:300], body.meal)
+    except Exception as err:
+        raise HTTPException(502, f"Could not estimate that meal: {err}")
+
+
+@api.post("/orders/{oid}/delivered")
+def order_delivered(oid: str, request: Request):
+    """The 'Got it' button: delivered now, items on the pantry shelf (if the tracker has not seen it yet)."""
+    from app.core.tracker import mark_delivered
+    store = _st(request).store
+    if not store.order(oid):
+        raise HTTPException(404, "No such order.")
+    mark_delivered(store, oid)
+    return store.order(oid)
+
+
+class Daily(BaseModel):
+    hour: int | None = None
+
+
+@api.post("/home/call")
+def home_call(request: Request):
+    """QuickPick phones the user now (check-in: medicines they listed, meals, reorders)."""
+    return {"job": _expert(request, "home").call_me()}
+
+
+@api.post("/home/daily")
+def home_daily(body: Daily, request: Request):
+    home = _expert(request, "home")
+    if body.hour is None:
+        home.stop_daily()
+        return {"ok": True, "hour": None}
+    if not 6 <= body.hour <= 22:
+        raise HTTPException(400, "Pick an hour between 6 and 22.")
+    return {"ok": True, "hour": body.hour, "job": home.daily(body.hour)}
+
+
 @api.post("/health/book")
 def health_book(body: Booking, request: Request):
     hh = _st(request).household
@@ -291,14 +358,16 @@ def health_book(body: Booking, request: Request):
 
 @api.post("/health/checkin/{person}")
 def health_checkin(person: str, body: Checkin, request: Request):
-    _person(request, person)
+    if person != "me":
+        _person(request, person)
     return {"job": _expert(request, "health").checkin(person, body.purpose)}
 
 
 @api.post("/health/rx")
 async def health_rx(request: Request, patient: str = Form(...), photo: UploadFile = File(...)):
     from app.experts.health.rx import read_prescription
-    _person(request, patient)
+    if patient != "me":
+        _person(request, patient)
     try:
         rx = await asyncio.to_thread(read_prescription, await photo.read(), photo.content_type or "image/jpeg")
     except Exception as err:
@@ -538,14 +607,22 @@ def _phone_call_for_start(st, msg, lines=None):
     return call
 
 
+def _digits(n):
+    return "".join(c for c in str(n or "") if c.isdigit())[-10:]
+
+
 def _person_by_phone(hh, number):
-    digits = lambda n: "".join(c for c in str(n or "") if c.isdigit())[-10:]
-    return next((k for k, p in hh["people"].items() if digits(p.get("phone")) and digits(p.get("phone")) == digits(number)),
+    return next((k for k, p in hh["people"].items() if _digits(p.get("phone")) and _digits(p.get("phone")) == _digits(number)),
                 None)
 
 
 def _answer_incoming(st, caller, call_sid):
-    """Someone phoned QuickPick: household members get the Kitchen list call; anyone else the Doorstep Expert."""
+    """Someone phoned QuickPick: the user gets their Home line, household members the Kitchen list call,
+    anyone else the Doorstep Expert."""
+    if "home" in st.experts and _digits(caller) and _digits(caller) == _digits(st.household["user"].get("phone")):
+        jid = st.experts["home"].answered(call_sid)
+        st.store.log("caller", jid, f"incoming call from {st.household['user']['name']} (Home line)")
+        return jid
     person = _person_by_phone(st.household, caller)
     if person and "kitchen" in st.experts:
         jid = st.experts["kitchen"].answered(person, call_sid)
@@ -571,8 +648,27 @@ def exotel_auth_ok(header):
 
 # ---------- app ----------
 def build_app(lifespan=None) -> FastAPI:
+    import hmac
+    from fastapi.middleware.cors import CORSMiddleware
+    from fastapi.responses import JSONResponse
+
     app = FastAPI(title="QuickPick Experts", lifespan=lifespan)
     app.include_router(api)
+
+    @app.middleware("http")
+    async def need_key(request: Request, call_next):
+        """APP_KEY set (phone mode sets it): the app's API needs it, so a public tunnel URL alone is not enough.
+        Twilio and Exotel routes have their own checks (signature, Basic auth)."""
+        key = os.getenv("APP_KEY", "")
+        if key and request.url.path.startswith("/api/") and request.method != "OPTIONS":
+            given = request.headers.get("x-quickpick-key") or request.query_params.get("key") or ""
+            if not hmac.compare_digest(given.encode(), key.encode()):
+                return JSONResponse({"detail": "QuickPick key needed."}, status_code=401)
+        return await call_next(request)
+
+    # The UI may be hosted elsewhere (Vercel) and call this server through the tunnel.
+    app.add_middleware(CORSMiddleware, allow_origin_regex=os.getenv("CORS_ORIGINS", r"https://[a-z0-9-]+\.vercel\.app"),
+                       allow_methods=["*"], allow_headers=["*"])
 
     @app.post("/calls/status")
     async def call_status(request: Request):
@@ -718,7 +814,9 @@ async def lifespan(app: FastAPI):
         register(KitchenExpert(store, hh, agent_im, ops, zepto))
         register(HealthExpert(store, hh))
         from app.experts.doorstep.expert import DoorstepExpert
+        from app.experts.home.expert import HomeExpert
         register(DoorstepExpert(store, hh))
+        register(HomeExpert(store, hh, REGISTRY["kitchen"]))
         app.state.store, app.state.household, app.state.experts = store, hh, REGISTRY
         if twilio_ready():
             from twilio.rest import Client

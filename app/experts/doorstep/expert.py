@@ -1,10 +1,11 @@
 """Doorstep Expert: answers calls to the household's QuickPick number from people who are not in household.yaml,
 usually the delivery partner. It knows only what is on the way and the family's own delivery instructions,
 guides the partner in, never shares an OTP, payment detail or ID, and leaves the family a card."""
+from app.core import lang
 from app.experts.base import CallPlan, Card, Expert
 
 DOORSTEP_CALL = """You are QuickPick, an AI assistant answering {user}'s phone. Your first sentence: "{greeting}"
-Then speak the caller's language (Telugu, Hindi or English) in short, friendly sentences. Never pretend to be human.
+{speak} Use short, friendly sentences. Never pretend to be human.
 Most callers are delivery partners. What you know:
 - On the way to {user}: {orders}
 - {user}'s delivery instructions: {instructions}
@@ -43,8 +44,9 @@ class DoorstepExpert(Expert):
 
     def call_plan(self, job):
         user = self.hh["user"]["name"]
-        greeting = f"Hello, I am QuickPick, an AI assistant answering {user}'s phone."
-        plan = CallPlan(DOORSTEP_CALL.format(user=user, greeting=greeting, orders=self.on_the_way(),
+        language = lang.default(self.hh)
+        greeting = lang.greet(language, "phone", user)
+        plan = CallPlan(DOORSTEP_CALL.format(user=user, greeting=greeting, orders=self.on_the_way(), speak=lang.speak(language),
                                              instructions=self.hh.get("delivery_instructions") or DEFAULT_INSTRUCTIONS),
                         greeting, max_minutes=3)
         s = plan.saved

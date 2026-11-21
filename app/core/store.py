@@ -174,3 +174,13 @@ class Store:
         if person:
             q, args = q + " AND person=?", args + [person]
         return [dict(r, value=json.loads(r["value"])) for r in self.db.execute(q + " ORDER BY updated", args)]
+
+    def forget(self, person, key):
+        return self.db.execute("DELETE FROM facts WHERE person=? AND key=?", (person, key)).rowcount == 1
+
+    def cancel(self, jid):
+        """A scheduled job that should not run any more (e.g. the daily call was switched off)."""
+        ok = self.db.execute("UPDATE jobs SET status='cancelled' WHERE id=? AND status='scheduled'", (jid,)).rowcount == 1
+        if ok:
+            self.log("jobs", jid, "cancelled")
+        return ok

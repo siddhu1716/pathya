@@ -1,0 +1,123 @@
+"""Home line, pantry and food log: the user's own calls, what is at home, today's meals, the app key."""
+import asyncio
+import os
+import sys
+import time
+
+from fastapi.testclient import TestClient
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from app.core import tracker
+from app.core.store import Store
+from app.experts.base import Card
+from app.experts.home.expert import HomeExpert
+from app.experts.kitchen import pantry
+from app.main import build_app
+from tests.test_api import HH, FakeKitchen
+
+
+def test_pantry_shelf_life_running_low_and_used_up():
+    store = Store(":memory:")
+    now = time.time()
+    pantry.stock(store, ["Arokya Toned Milk 500 ml x2 - Rs 64", "Tata Toor Dal 1 kg x1 - Rs 180",
+                         "Fresh Veggies Mix x1"], "swiggy", "O1", when=now - 2 * 86400)
+    shelf = {i["name"]: i for i in pantry.items(store, now)}
+    assert shelf["Arokya Toned Milk 500 ml"]["low"] and shelf["Arokya Toned Milk 500 ml"]["qty"] == 2   # 2-day item
+    assert not shelf["Tata Toor Dal 1 kg"]["low"] and shelf["Fresh Veggies Mix"]["days"] == 5         # not "egg"
+    assert pantry.items(store, now)[0]["low"]                                                          # low first
+    assert pantry.reorder_line(shelf["Arokya Toned Milk 500 ml"]) == "2 x Arokya Toned Milk 500 ml"
+    assert pantry.used_up(store, ["toor dal"]) == ["Tata Toor Dal 1 kg"]
+    assert len(pantry.items(store)) == 2
+
+
+def test_delivery_stocks_the_pantry_once_and_dry_runs_too():
+    store = Store(":memory:")
+    tracker.record(store, "c1", {"lines": ["Curd 500 g x1"], "total": "₹52", "payload": {"address_id": "a"}},
+                   {"order": {"orderId": "O9"}})
+    assert pantry.items(store) == []                                   # placed, not delivered yet
+    assert tracker.mark_delivered(store, "O9") and not tracker.mark_delivered(store, "O9")
+    assert [i["name"] for i in pantry.items(store)] == ["Curd 500 g"] and store.order("O9")["delivered"]
+    tracker.record(store, "c2", {"lines": ["Bread x1"], "payload": {}}, {"dry_run": True})
+    assert {i["name"] for i in pantry.items(store)} == {"Curd 500 g", "Bread"}
+
+
+def test_food_log_today():
+    store = Store(":memory:")
+
+    async def fake(text):
+        return {"kcal": 450, "protein_g": 14.0, "carbs_g": 70.0, "fat_g": 10.0, "fibre_g": 6.0}
+    asyncio.run(pantry.log_meal(store, "2 idli, sambar", "breakfast", estimate=fake))
+    asyncio.run(pantry.log_meal(store, "rice, pappu, perugu", "lunch", estimate=fake))
+    t = pantry.today(store, HH)
+    assert t["total"]["kcal"] == 900 and len(t["meals"]) == 2 and t["targets"]["kcal"] == 1885
+
+
+def env(monkeypatch=None):
+    from app.experts.doorstep.expert import DoorstepExpert
+    from app.experts.health.expert import HealthExpert
+    store = Store(":memory:")
+    app = build_app()
+    kitchen = FakeKitchen(store)
+    app.state.store, app.state.household = store, HH
+    app.state.experts = {"kitchen": kitchen, "health": HealthExpert(store, HH), "doorstep": DoorstepExpert(store, HH),
+                         "home": HomeExpert(store, HH, kitchen)}
+    return app, store, kitchen
+
+
+def test_my_number_gets_the_home_line_in_telugu_and_a_cart_after(monkeypatch):
+    from app.main import _answer_incoming
+    app, store, kitchen = env()
+    seen = []
+
+    async def handle(text, ref=None):
+        seen.append(text)
+        return Card("kitchen", "order", "Swiggy Instamart cart", [text])
+    kitchen.handle = handle
+
+    async def fake(text):
+        return {"kcal": 300, "protein_g": 9.0, "carbs_g": 50.0, "fat_g": 6.0, "fibre_g": 4.0}
+    monkeypatch.setattr(pantry, "estimate_meal", fake)
+    pantry.stock(store, ["Basmati Rice 1 kg x1"], "swiggy", "O1")
+    jid = _answer_incoming(app.state, "+91 98000 00000", "CA1")              # the user's own number
+    home = app.state.experts["home"]
+    job = store.job(jid)
+    assert job["expert"] == "home" and job["person"] == "me" and store.upcoming() == []
+    plan = home.call_plan(job)
+    assert "నమస్కారం Shiva" in plan.greeting and "AI" in plan.greeting      # Telugu by default, says it is an AI
+    assert "Basmati Rice 1 kg" in plan.instructions and "never suggest, start, stop or change" in plan.instructions
+    t = {f.__name__: f for f in plan.tools}
+    t["set_order"](["2 litres milk", "1 kg tomatoes"])
+    t["log_food"]("lunch", "rice and pappu")
+    t["ran_out"](["rice"])
+    t["medicine_taken"]("yes, took it after breakfast")
+    t["end_call"]("Ordered milk and tomatoes")
+    card = asyncio.run(home.after_call(job, plan.saved))
+    assert card.kind == "order" and seen == ["2 litres milk, 1 kg tomatoes"]            # still needs a tap
+    assert pantry.today(store, HH)["total"]["kcal"] == 300 and pantry.items(store) == []
+    assert store.facts("me", "medlog:")[0]["value"]["answer"].endswith("after breakfast")
+    jid2 = _answer_incoming(app.state, "+919800000001", "CA2")                 # Amma still gets the Kitchen list call
+    assert store.job(jid2)["expert"] == "kitchen"
+
+
+def test_daily_check_in_reschedules_and_stops():
+    app, store, _ = env()
+    home = app.state.experts["home"]
+    first = home.daily(20)
+    assert home.daily_hour() == 20 and store.job(first)["payload"]["to"] == HH["user"]["phone"]
+    asyncio.run(home.after_call(store.job(first), {"summary": "Checked in"}))
+    assert len([j for j in store.upcoming() if j["expert"] == "home"]) == 2    # tomorrow's call queued
+    home.stop_daily()
+    assert home.daily_hour() is None and [j for j in store.upcoming() if j["expert"] == "home"] == []
+
+
+def test_app_key_guards_the_api(monkeypatch):
+    app, store, _ = env()
+    with TestClient(app) as client:
+        assert client.get("/api/state").status_code == 200
+        monkeypatch.setenv("APP_KEY", "s3cret-key-123")
+        assert client.get("/api/state").status_code == 401
+        assert client.get("/api/state", headers={"X-QuickPick-Key": "s3cret-key-123"}).status_code == 200
+        assert client.get("/api/state?key=s3cret-key-123").json()["user"] == "Shiva"
+        r = client.post("/api/orders/nope/delivered", headers={"X-QuickPick-Key": "s3cret-key-123"})
+        assert r.status_code == 404

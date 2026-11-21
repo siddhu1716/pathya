@@ -105,7 +105,7 @@ def test_phone_bridge_runs_plan_and_hangs_up_after_goodbye():
     update = rt.sent[0]["session"]
     assert rt.sent[0]["type"] == "session.update" and update["audio"]["input"]["format"]["type"] == "audio/pcmu"
     assert {t["name"] for t in update["tools"]} >= {"book_slot", "end_call"}
-    assert "Hello, I am QuickPick" in rt.sent[1]["response"]["instructions"]               # greeting says it is an AI
+    assert "QuickPick" in rt.sent[1]["response"]["instructions"] and "AI" in rt.sent[1]["response"]["instructions"]               # greeting says it is an AI
     assert {"type": "input_audio_buffer.append", "audio": "AAAA"} in rt.sent                # caller audio -> model
     assert {"event": "media", "streamSid": "MZ1", "media": {"payload": "QUJD"}} in tw.sent  # model audio -> caller
     assert {"event": "clear", "streamSid": "MZ1"} in tw.sent                                # barge-in clears playback

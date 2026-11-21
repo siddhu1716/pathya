@@ -39,6 +39,17 @@ def exotel_secret():
     return secret
 
 
+def app_key():
+    """APP_KEY guards the app's API once it is public; created once, kept in .env."""
+    import secrets
+    from dotenv import dotenv_values
+    key = (dotenv_values(ENV).get("APP_KEY") or "").strip()
+    if len(key) < 12:
+        key = secrets.token_urlsafe(12)
+        set_env({"APP_KEY": key})
+    return key
+
+
 def point_number_here(host):
     """Incoming calls to the Twilio number -> https://<host>/calls/incoming."""
     from dotenv import dotenv_values
@@ -73,6 +84,8 @@ def main(port="8000"):
                     print(f"Could not set the incoming-call webhook: {err}")
                 print(f"Exotel Voicebot applet URL (paste into your call flow):\n  "
                       f"wss://quickpick:{exotel_secret()}@{m.group(1)}/exotel", flush=True)
+                print(f"Open on your phone (the key is remembered after the first visit):\n  "
+                      f"https://{m.group(1)}/?key={app_key()}", flush=True)
                 print(f"Now (re)start the app: uvicorn app.main:app --port {port}")
                 print("Ctrl+C here closes the tunnel and switches back to browser calls.", flush=True)
         proc.wait()

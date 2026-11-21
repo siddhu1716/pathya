@@ -4,15 +4,15 @@ Ordering rules live in swiggy.py and zepto.py (tested); this file wires them in.
 import os
 import time
 
+from app.core import lang
 from app.experts.base import CallPlan, Card, Expert
 from app.experts.kitchen import planner as pl
 from app.experts.kitchen import swiggy as sw
 from app.experts.kitchen import zepto as zp
 
 LIST_CALL = """You are QuickPick, an AI assistant, talking with {who} for {user}'s family to take this week's grocery list.
-Your first sentence: "{greeting}" After it, speak {lang}, simply and politely (mixing in common English words
-is fine); if they answer in another language, continue in theirs.
-Ask what the kitchen needs this week; ask for quantities when missing.
+Your first sentence: "{greeting}" {speak} Speak simply and politely.
+Then say you are {why}. Ask what the kitchen needs; ask for quantities when missing.
 You may remind them of at most three usual items: {usual}.
 Call save_list with one entry per item, quantity included, in their words (for example "2 litres paalu").
 Read the list back, at most three items at a time, fix corrections, then call save_list again with the final list.
@@ -33,8 +33,8 @@ def for_people(msg):
 
 
 MENU_CALL = """You are QuickPick, an AI assistant, calling {who} for {user}'s family about tomorrow's cooking.
-Your first sentence: "{greeting}" After it, speak {lang}, simply and politely; if they answer in another language,
-continue in theirs. Tomorrow's menu: {menu}.
+Your first sentence: "{greeting}" {speak} Speak simply and politely.
+Then say you are calling about tomorrow's cooking. Tomorrow's menu: {menu}.
 Read the menu, at most three dishes at a time. Ask whether anything is missing in the kitchen to cook it.
 Call save_missing with every missing item and quantity in their words (an empty list if nothing is missing).
 Never discuss prices, payment, health or diets. Finish with end_call."""
@@ -64,12 +64,12 @@ class KitchenExpert(Expert):
             return self._menu_plan(job)
         p, user = self.hh["people"][job["payload"]["person"]], self.hh["user"]["name"]
         usual = [f"{u['typical']} x {u['name']}" for u in pl.usuals(self.store, 3)]
-        if job["payload"].get("direction") == "inbound":
-            greeting = f"Namaskaram {p['name']}, I am QuickPick, an AI assistant answering for {user}. What does the kitchen need?"
-        else:
-            greeting = f"Namaskaram {p['name']}, I am QuickPick, an AI assistant calling for {user} about this week's groceries."
-        plan = CallPlan(LIST_CALL.format(who=p["name"], user=user, greeting=greeting,
-                                         lang=p.get("language", "Telugu"), usual=", ".join(usual) or "none"),
+        inbound = job["payload"].get("direction") == "inbound"
+        language = lang.of(self.hh, p)
+        greeting = lang.greet(language, "answering" if inbound else "calling", user, p["name"])
+        why = "here to take the grocery list" if inbound else "calling about this week's groceries"
+        plan = CallPlan(LIST_CALL.format(who=p["name"], user=user, greeting=greeting, speak=lang.speak(language),
+                                         why=why, usual=", ".join(usual) or "none"),
                         greeting, max_minutes=5)
 
         def save_list(items: list[str], notes: str) -> str:
@@ -104,8 +104,9 @@ class KitchenExpert(Expert):
         pay = job["payload"]
         p, user = self.hh["people"][pay["person"]], self.hh["user"]["name"]
         menu = "; ".join(f"{m['slot']}: {m['dish']}" for m in pay["menu"].get("meals", [])) or "not set"
-        greeting = f"Namaskaram {p['name']}, I am QuickPick, an AI assistant calling for {user} about tomorrow's menu."
-        plan = CallPlan(MENU_CALL.format(who=p["name"], user=user, greeting=greeting, lang=p.get("language", "Telugu"),
+        language = lang.of(self.hh, p)
+        greeting = lang.greet(language, "calling", user, p["name"])
+        plan = CallPlan(MENU_CALL.format(who=p["name"], user=user, greeting=greeting, speak=lang.speak(language),
                                          menu=menu), greeting, max_minutes=4)
 
         def save_missing(items: list[str], notes: str) -> str:

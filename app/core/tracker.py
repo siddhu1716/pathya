@@ -27,6 +27,7 @@ def record(store, aid, card, result):
     if result.get("dry_run"):
         store.add_order(f"dry-{aid}", "dry run", status="DRY RUN: not placed", **common)
         _remember(store, card, "dry run")
+        stock(store, card.get("lines", []), "dry run", f"dry-{aid}")   # so the demo's "At home" fills up
         return [f"dry-{aid}"]
     ids = order_ids(result.get("order"))
     eta = result.get("eta") or {}
@@ -40,6 +41,22 @@ def _remember(store, card, shop):
     """Household memory: what this home buys (planner.remember_order)."""
     from app.experts.kitchen.planner import remember_order
     remember_order(store, card.get("lines", []), shop)
+
+
+def stock(store, lines, shop, oid):
+    from app.experts.kitchen.pantry import stock as put_away
+    put_away(store, lines, shop, oid)
+
+
+def mark_delivered(store, oid, status="delivered", eta=None, detail=None):
+    """Mark an order delivered once (tracker or the "Got it" button); its items go on the pantry shelf."""
+    o = store.order(oid)
+    if not o or o.get("delivered"):
+        return False
+    store.update_order(oid, status=status, eta=eta, detail=detail, delivered=True)
+    stock(store, o["items"], o["store"], oid)
+    store.log("orders", oid, f"{o['store']}: {status}, {len(o['items'])} item(s) now at home")
+    return True
 
 
 async def tick(store, kitchen, now=None, state=None):
@@ -58,6 +75,10 @@ async def tick(store, kitchen, now=None, state=None):
                 state["paused_until"] = now + BACKOFF_S
                 store.log("orders", o["id"], "tracking paused for 5 min (store rate limit)")
                 return changed
+            continue
+        if delivered:
+            if mark_delivered(store, o["id"], status or "delivered", eta=eta, detail=detail):
+                changed.append(o["id"])
             continue
         if store.update_order(o["id"], status=status, eta=eta, detail=detail, delivered=delivered):
             changed.append(o["id"])

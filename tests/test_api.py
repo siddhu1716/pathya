@@ -211,7 +211,8 @@ def test_browser_call_runs_expert_tools_and_makes_card(env, monkeypatch):
                        headers={"Content-Type": "application/sdp"}).text == "v=0 answer"
     cfg = seen["config"]
     assert "AI assistant" in cfg["instructions"] and {t["name"] for t in cfg["tools"]} >= {"book_slot", "end_call"}
-    assert "Hello, I am QuickPick" in client.get(f"/api/calls/{jid}/greeting").json()["greeting"]
+    g = client.get(f"/api/calls/{jid}/greeting").json()["greeting"]
+    assert "QuickPick" in g and "AI" in g and "Shiva" in g          # Telugu by default, says it is an AI
 
     late = (base + timedelta(days=1)).replace(hour=16).strftime("%Y-%m-%dT%H:%M")
     good = (base + timedelta(days=1)).replace(hour=10, minute=30).strftime("%Y-%m-%dT%H:%M")
@@ -289,7 +290,7 @@ def test_doorstep_guides_without_ids_or_otp(env):
     d = client.app.state.experts["doorstep"]
     store.add_order("254220219978762", "swiggy", "c1", None, ["Milk x2", "Curd x1"], "₹149", "Loft", "a1", "Out for delivery", "5 mins")
     plan = d.call_plan(store.job(d.answered("CA9", "1234")))
-    assert plan.greeting.startswith("Hello, I am QuickPick, an AI assistant")
+    assert "QuickPick" in plan.greeting and "AI" in plan.greeting and "Shiva" in plan.greeting   # Telugu by default
     assert "254220219978762" not in plan.instructions and "2 item(s)" in plan.instructions
     assert "Never share an OTP" in plan.instructions
     tools = {f.__name__: f for f in plan.tools}
