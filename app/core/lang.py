@@ -46,3 +46,44 @@ def speak(lang):
     """The prompt line every call uses after the greeting."""
     return (f"After the first sentence, continue in {lang} (mixing in common English words is fine), but always reply in "
             "the language of the person's most recent sentence: if they switch, you switch at once and stay in theirs.")
+
+
+# Unicode blocks of Indian scripts. The transcriber writes Hindi in Devanagari, Telugu in Telugu script, and so on.
+SCRIPTS = {"Hindi": (0x0900, 0x097F), "Bengali": (0x0980, 0x09FF), "Punjabi": (0x0A00, 0x0A7F),
+           "Gujarati": (0x0A80, 0x0AFF), "Odia": (0x0B00, 0x0B7F), "Tamil": (0x0B80, 0x0BFF), "Telugu": (0x0C00, 0x0C7F),
+           "Kannada": (0x0C80, 0x0CFF), "Malayalam": (0x0D00, 0x0D7F), "Urdu": (0x0600, 0x06FF)}
+
+
+def heard(text):
+    """The language of what the person said, from its script; None for English letters (could be English, or Hindi
+    or Telugu typed in English letters), so those are left to the model."""
+    counts = {}
+    for ch in str(text or ""):
+        cp = ord(ch)
+        for name, (lo, hi) in SCRIPTS.items():
+            if lo <= cp <= hi:
+                counts[name] = counts.get(name, 0) + 1
+    if not counts:
+        return None
+    name, n = max(counts.items(), key=lambda kv: kv[1])
+    return name if n >= 3 else None
+
+
+def switch_note(language):
+    """Sent into the call when the person's language changes: models sometimes keep the opening language."""
+    return (f"The person is now speaking {language}. From your next reply, speak only {language} (common English "
+            f"words are fine), until they switch again.")
+
+
+class Follow:
+    """Per call: the language the person is speaking, and the note to send when it changes."""
+
+    def __init__(self, opening):
+        self.now = opening
+
+    def note(self, text):
+        said = heard(text)
+        if said and said != self.now:
+            self.now = said
+            return switch_note(said)
+        return None

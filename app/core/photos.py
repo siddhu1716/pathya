@@ -13,7 +13,7 @@ ID = re.compile(r"^[0-9a-f]{20}$")
 
 
 def folder():
-    d = Path(os.getenv("PHOTOS_DIR", ROOT / "photos"))
+    d = Path(os.getenv("PHOTOS_DIR") or ROOT / "photos")
     d.mkdir(parents=True, exist_ok=True)
     return d
 

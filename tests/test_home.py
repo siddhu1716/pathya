@@ -230,7 +230,7 @@ def test_phone_sign_in_only_for_family_numbers_and_the_session_opens_the_api(mon
         app.state.twilio = NS(verify=Verify())
         assert client.post("/api/auth/start", json={"phone": "+919800000002"}).status_code == 403  # the cook: no
         assert client.post("/api/auth/start", json={"phone": "+919811111111"}).status_code == 403  # a stranger: no
-        assert client.post("/api/auth/start", json={"phone": "098000 00001"}).json() == {"sent": True, "to": "…0001"}
+        assert client.post("/api/auth/start", json={"phone": "098000 00001"}).json() == {"sent": True, "to": "…0001", "channel": "sms"}
         assert sent == ["+919800000001"] and client.post("/api/auth/start", json={"phone": "9800000001"}).status_code == 429
         assert client.post("/api/auth/check", json={"phone": "9800000001", "code": "999999"}).status_code == 401
         s = client.post("/api/auth/check", json={"phone": "9800000001", "code": "123456"}).json()

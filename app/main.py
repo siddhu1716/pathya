@@ -163,6 +163,7 @@ CODE_EVERY = 30                                   # seconds between codes to one
 class SignIn(BaseModel):
     phone: str
     code: str = ""
+    channel: str = "sms"                      # sms, or call: Twilio reads the code out
 
 
 @api.get("/auth/status")
@@ -186,14 +187,14 @@ def auth_start(body: SignIn, request: Request):
     if now - sent.get(number, 0) < CODE_EVERY:
         raise HTTPException(429, f"A code was just sent. Wait {int(CODE_EVERY - (now - sent[number])) + 1} seconds.")
     try:
-        auth.send_code(st.twilio, st.store, number)
+        auth.send_code(st.twilio, st.store, number, body.channel)
     except Exception as err:
         msg = str(err)
         raise HTTPException(502, "Twilio's trial only texts verified numbers: verify this number in Family > Phone > "
                                  "Verify first." if "unverified" in msg.lower() else f"Could not send the code: {msg[:200]}")
     sent[number] = now
-    st.store.log("auth", found[0], f"sign-in code sent to …{_digits(number)[-4:]}")
-    return {"sent": True, "to": f"…{_digits(number)[-4:]}"}
+    st.store.log("auth", found[0], f"sign-in code ({'call' if body.channel == 'call' else 'SMS'}) to …{_digits(number)[-4:]}")
+    return {"sent": True, "to": f"…{_digits(number)[-4:]}", "channel": "call" if body.channel == "call" else "sms"}
 
 
 @api.post("/auth/check")
@@ -1054,6 +1055,7 @@ class PharmacyFind(BaseModel):
     lng: float | None = None
     area: str = ""
     meds: list[int] | None = None          # indexes into the member's medicines; None = all
+    via: str | None = None                 # "browser": the pharmacy call rings in the app (Calls ring on: This browser)
 
 
 @api.post("/health/pharmacy")
@@ -1070,17 +1072,28 @@ async def health_pharmacy(body: PharmacyFind, request: Request):
         raise HTTPException(400, f"{m['name']} has no medicines listed yet. Scan the prescription first.")
     if (body.lat is None or body.lng is None) and not body.area.strip():
         raise HTTPException(400, "Share your location, or type the area.")
-    try:
-        found = await asyncio.to_thread(pharmacy.find, body.lat, body.lng, body.area.strip()[:80],
-                                        st.household.get("city", "Hyderabad"))
-    except Exception as err:
-        raise HTTPException(502, f"Could not search for pharmacies: {err}")
-    if not found["pharmacies"]:
-        raise HTTPException(404, f"No pharmacy with a listed phone number found near {found['area']}. Try typing the area.")
     photo = next((x.get("photo") for x in chosen if x.get("photo")), None)
-    card = _expert(request, "health").pharmacies_card(body.who, found, [M.line(x) for x in chosen], photo)
-    st.store.log("health", body.who, f"found {len(found['pharmacies'])} pharmacies near {found['area']}")
-    return {"card": st.store.add_card(card.to_dict()), "area": found["area"], "count": len(found["pharmacies"])}
+    meds = [M.line(x) for x in chosen]
+
+    async def search():
+        """In the background: a careful web search takes about a minute (longer than a tunnel waits for a reply)."""
+        try:
+            found = await asyncio.to_thread(pharmacy.find, body.lat, body.lng, body.area.strip()[:80],
+                                            st.household.get("city", "Hyderabad"))
+        except Exception as err:
+            found, why = None, f"The search failed: {str(err)[:200]}"
+        else:
+            why = f"No pharmacy with a listed phone number near {found['area']}. Try typing the area."
+        if found and found["pharmacies"]:
+            st.store.add_card(_expert(request, "health").pharmacies_card(body.who, found, meds, photo,
+                                                                          "browser" if body.via == "browser" else None).to_dict())
+            st.store.log("health", body.who, f"found {len(found['pharmacies'])} pharmacies near {found['area']}")
+        else:
+            _call_problem(st.store, "No pharmacy found", why)
+    st.tasks.add(t := asyncio.create_task(search()))
+    t.add_done_callback(st.tasks.discard)
+    st.store.log("health", body.who, f"looking for pharmacies for {m['name']}'s medicines")
+    return {"searching": True, "medicines": len(meds)}
 
 
 @api.get("/health/pharmacy/links")
@@ -1248,10 +1261,14 @@ class Line(BaseModel):
 
 @api.post("/calls/{jid}/line")
 def call_line(jid: str, body: Line, request: Request):
-    live = _st(request).live.get(jid)
+    """A line of a browser call's transcript (the home screen shows it live). For the person's lines, a note to send
+    into the call when they switched language (app/core/lang.py)."""
+    st = _st(request)
+    live = st.live.get(jid)
     if live is not None and body.role in ("ai", "them", "tool"):
         live["lines"].append({"role": body.role, "text": body.text[:500]})
-    return {"ok": True}
+    call = st.calls.get(jid)
+    return {"ok": True, "note": call.follow.note(body.text) if call and body.role == "them" else None}
 
 
 @api.get("/calls/{jid}/greeting")

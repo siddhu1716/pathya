@@ -40,8 +40,10 @@ def verify_sid(client, store):
     return sid
 
 
-def send_code(client, store, phone):
-    return client.verify.v2.services(verify_sid(client, store)).verifications.create(to=normalize(phone), channel="sms").status
+def send_code(client, store, phone, channel="sms"):
+    """channel: sms, or call (Twilio reads the code out; for phones whose SMS does not arrive)."""
+    return client.verify.v2.services(verify_sid(client, store)).verifications.create(
+        to=normalize(phone), channel="call" if channel == "call" else "sms").status
 
 
 def code_ok(client, store, phone, code):

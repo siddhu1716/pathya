@@ -9,7 +9,7 @@ import json
 import os
 from contextlib import asynccontextmanager
 
-from app.core import convo
+from app.core import convo, lang
 from app.core.browser_call import greeting_events, session_config
 from app.core.carriers import Twilio
 
@@ -45,6 +45,7 @@ async def phone_bridge(ws, call_for_start, finish, hang_up, log, connect=connect
     stream, call_sid = info["stream"], info["call"]
     transcript = transcript if transcript is not None else []
     state = {"ending": False, "hung_up": False}
+    follow = lang.Follow(getattr(call.plan, "language", "") or "Telugu")
     timers = []
 
     async def send(*events):
@@ -96,6 +97,11 @@ async def phone_bridge(ws, call_for_start, finish, hang_up, log, connect=connect
                             await send(carrier.clear(stream))   # the person interrupted: stop playing
                     elif t == "conversation.item.input_audio_transcription.completed" and ev.get("transcript", "").strip():
                         transcript.append({"role": "them", "text": ev["transcript"].strip()})
+                        note = follow.note(ev["transcript"])
+                        if note:                                # they switched language: say so to the model
+                            log(f"language: {follow.now}")
+                            await oa.send(json.dumps({"type": "conversation.item.create", "item": {
+                                "type": "message", "role": "system", "content": [{"type": "input_text", "text": note}]}}))
                     elif t == "response.output_audio_transcript.done" and ev.get("transcript", "").strip():
                         transcript.append({"role": "ai", "text": ev["transcript"].strip()})
                     elif t == "response.function_call_arguments.done":

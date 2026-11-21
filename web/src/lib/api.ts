@@ -197,7 +197,7 @@ export const api = {
   icsUrl: (id: string) => `${server()}/api/cards/${id}/ics${key() ? `?key=${encodeURIComponent(key())}` : ""}`,
   calls: () => request<CallRecord[]>("/api/calls"),
   orders: () => request<Order[]>("/api/orders"),
-  line: (id: string, line: Line) => post<{ ok: boolean }>(`/api/calls/${id}/line`, line),
+  line: (id: string, line: Line) => post<{ ok: boolean; note?: string | null }>(`/api/calls/${id}/line`, line),
   kitchen: () => request<KitchenOverview>("/api/kitchen/overview"),
   reorder: (items: string[]) => post<{ card: string }>("/api/kitchen/reorder", { items }),
   mealplan: (days: number, notes: string, eaters: string[] | null = null, guests = 0) =>
@@ -224,12 +224,13 @@ export const api = {
     request<MealEntry>("/api/kitchen/meal", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ who, id, meal }) }),
   photoUrl: (id: string) => `${server()}/api/photos/${id}${key() ? `?key=${encodeURIComponent(key())}` : ""}`,
   authStatus: () => request<{ phone_sign_in: boolean; needed: boolean }>("/api/auth/status"),
-  signInStart: (phone: string) => post<{ sent: boolean; to: string }>("/api/auth/start", { phone }),
+  signInStart: (phone: string, channel: "sms" | "call" = "sms") =>
+    post<{ sent: boolean; to: string; channel: string }>("/api/auth/start", { phone, channel }),
   signInCheck: (phone: string, code: string) => post<{ token: string; who: string; name: string }>("/api/auth/check", { phone, code }),
   me: () => request<{ via: "phone" | "link" | "open"; who: string; name: string; phone_end?: string }>("/api/auth/me"),
   signOut: () => post<{ ok: boolean }>("/api/auth/signout"),
-  findPharmacy: (b: { who: string; lat?: number; lng?: number; area?: string; meds?: number[] }) =>
-    post<{ card: string; area: string; count: number }>("/api/health/pharmacy", b),
+  findPharmacy: (b: { who: string; lat?: number; lng?: number; area?: string; meds?: number[]; via?: string }) =>
+    post<{ searching: boolean; medicines: number }>("/api/health/pharmacy", b),
   pharmacyLinks: (who: string) => request<{ name: string; links: Record<string, string> }[]>(`/api/health/pharmacy/links?who=${encodeURIComponent(who)}`),
   reminders: (k: string, on: boolean) => post<{ ok: boolean }>(`/api/family/${k}/reminders`, { on }),
   callMember: (k: string) => post<{ job: string }>(`/api/family/${k}/call${via()}`),

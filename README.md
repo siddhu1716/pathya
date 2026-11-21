@@ -16,9 +16,14 @@ and turns what is missing into a Swiggy Instamart cart you approve with one tap.
   labelled as a general reference; a nutritionist's numbers override it.
 - **Calls:** check-in and medicine reminder calls (OpenAI Realtime) to anyone with a number in `household.yaml`,
   on Twilio, Exotel or right in the browser.
-  - Calls open in Telugu and follow whatever language the person speaks.
+  - Calls open in Telugu and follow whatever language the person speaks. When the words come back in another script
+    (Hindi, Telugu, Tamil...), the call is told to switch.
   - A call never hangs up while something is pending.
-  - Family members can also call in. The cook gets the grocery-list call; delivery partners get the Doorstep Expert.
+  - Pathya's own calls always go out on Twilio. If the phone network refuses one (Jio refuses Twilio's US number),
+    it rings in the app instead and a card says why.
+  - Family members can also call in. The cook gets the grocery-list call.
+  - Calls your phone forwards to the Exotel number get the Doorstep Expert: it guides the delivery partner in from
+    your delivery instructions, alerts you, and takes a message from anyone else.
 - **Voice:** More > Pathya's voice, for every call.
   - Pick one of the 10 OpenAI voices and hear a sample.
   - Choose an Indian or neutral accent and a pace.
@@ -31,8 +36,10 @@ and turns what is missing into a Swiggy Instamart cart you approve with one tap.
   with quantities ("rice 0.5 cup, dal 1.5 katori").
   - +/- changes their totals exactly, and "Fit to target" scales a plate to that person's energy target.
   - The cook hears the quantities on the menu call.
-- **Camera:** one photo, read by a vision model.
-  - A plate is logged with estimated calories and protein.
+- **Camera:** one photo, read by a vision model. The photo is kept (gitignored `photos/`) and shown next to what was
+  read, so you can look at it again.
+  - A plate is logged with estimated calories and protein, as breakfast, lunch, snack or dinner by when the photo was
+    taken (its EXIF time, else the file time; within the last 7 days). Change it with one tap.
   - A medicine strip, a prescription or a body composition report (InBody) is copied exactly as printed and saved only
     after you confirm. A report's BMR or lean mass then sets that person's energy target.
 - **Age and elders:** checkups people that age are usually offered, with their source (India's NP-NCD screening, WHO
@@ -45,7 +52,9 @@ and turns what is missing into a Swiggy Instamart cart you approve with one tap.
 - **Food log:** meals said on a call or typed in the app, with estimated calories, protein, fibre and added sugar per
   person.
 - **Medicines:**
-  - kept exactly as written, entered by hand or from a prescription photo you confirm;
+  - kept exactly as written, entered by hand or from a prescription photo you confirm. Every line is saved; lines the
+    reader was unsure of, or without a time, are flagged and left out of reminder calls until you tap "Matches the
+    paper";
   - daily reminder calls for the length of the course;
   - a missed dose becomes a card for you.
 - **Orders:** Swiggy Instamart MCP (Zepto MCP for missing items, or the whole list when Instamart is offline).
@@ -68,6 +77,17 @@ and turns what is missing into a Swiggy Instamart cart you approve with one tap.
 
   A clinic that isn't saved yet is looked up on the web (number and source shown). It is added to `household.yaml`
   and phoned only after your tap.
+- **Order medicines** (Family > person > Medicines). No pharmacy MCP is usable yet: Tata 1mg's `mcp.1mg.com` does not
+  resolve, and Apollo 24|7 and PharmEasy have none. So:
+  - share your location (or type the area) and Pathya finds up to 3 pharmacies nearby, each with its number and
+    source;
+  - after your tap the pharmacy goes into `household.yaml` (`pharmacies:`), and Pathya phones it to ask what they
+    have, the total and home delivery. It reads the names exactly as written, never accepts a substitute and never
+    orders;
+  - the result card opens WhatsApp with the list and shares the prescription photo, so you place the order;
+  - or open each medicine in Tata 1mg, Apollo 24|7 or PharmEasy yourself (their own search; no prices fetched).
+- **Sign in:** with your phone number and a code by SMS or a voice call (Twilio Verify). Only the user's and family
+  members' numbers in `household.yaml` can sign in. The `?key=` link still works.
 
 Pathya never diagnoses and never suggests, starts, stops or changes a medicine or dose (see [AGENTS.md](AGENTS.md)).
 

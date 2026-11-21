@@ -7,7 +7,10 @@ import Index from "./pages/Index";
 import CallPage from "./pages/CallPage";
 import NotFound from "./pages/NotFound";
 
-const queryClient = new QueryClient();
+// A missing or expired key is not worth retrying: show the sign-in screen at once.
+const queryClient = new QueryClient({
+  defaultOptions: { queries: { retry: (n, err) => !/key needed/i.test((err as Error).message) && n < 2 } },
+});
 
 const App = () => (
   <QueryClientProvider client={queryClient}>

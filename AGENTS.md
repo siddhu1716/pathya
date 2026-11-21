@@ -20,10 +20,10 @@ Python 3.11+, FastAPI, Jinja2 + HTMX (Pico.css), SQLite (app/core/store.py), ope
 ## Layout
 - app/main.py: routes and lifespan
 - app/concierge.py: one sentence to the right Experts
-- app/core/: store.py, jobs.py, caller.py, safety.py, call_session.py
+- app/core/: store.py, jobs.py, caller.py, safety.py, call_session.py, auth.py (phone sign-in), photos.py (scanned photos, gitignored photos/)
 - app/experts/base.py: the Expert contract and registry
 - app/experts/kitchen/: swiggy.py (ordering rules, tested), zepto.py, planner.py, pantry.py (at home, food log), expert.py
-- app/experts/health/: expert.py, rx.py
+- app/experts/health/: expert.py, rx.py, finder.py (clinics), pharmacy.py (pharmacies near you; the call only asks, never orders)
 - app/experts/family/: profiles.py (members, goals, targets), meds.py (as written, daily reminders), board.py (weekly leaderboard), scan.py (camera), checkups.py (age checkups, elder intake watch), guard.py (cart vs each member's own notes)
 - app/experts/home/: the Family line: check-in and medicine reminder calls for any member with a household.yaml phone; doorstep/: unknown callers
 - app/core/lang.py: call languages (Telugu default; household.yaml `language:` and per-person `language:`)

@@ -30,7 +30,9 @@ export default function CallPage() {
   const add = (l: Line) => {
     transcript.current = [...transcript.current, l];
     setLines(transcript.current);
-    if (id) api.line(id, l).catch(() => undefined);     // the home screen shows the call live
+    if (id) api.line(id, l).then((r) => {                 // the home screen shows the call live
+      if (r.note) send({ type: "conversation.item.create", item: { type: "message", role: "system", content: [{ type: "input_text", text: r.note }] } });
+    }).catch(() => undefined);
   };
 
   useEffect(() => {

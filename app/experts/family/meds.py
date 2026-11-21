@@ -81,7 +81,11 @@ def active(meds, slot, now=None):
 
 
 def line(m):
-    return " ".join(str(x) for x in (m.get("name_as_written"), m.get("strength"), m.get("dose"), m.get("food")) if x)
+    name = str(m.get("name_as_written") or "")
+    strength = m.get("strength")
+    if strength and str(strength).replace(" ", "").lower() in name.replace(" ", "").lower():
+        strength = None                                        # "Tab. Metformin 500 mg" already says it
+    return " ".join(str(x) for x in (name, strength, m.get("dose"), m.get("food")) if x)
 
 
 def reminders_on(store, key):

@@ -112,7 +112,11 @@ function PhoneSignIn({ onLink }: { onLink: () => void }) {
   const [code, setCode] = useState("");
   const [sentTo, setSentTo] = useState<string | null>(null);
   const fail = (e: Error) => toast.error(e.message);
-  const start = useMutation({ mutationFn: () => api.signInStart(phone), onSuccess: (r) => setSentTo(r.to), onError: fail });
+  const [how, setHow] = useState<"sms" | "call">("sms");
+  const start = useMutation({
+    mutationFn: (channel: "sms" | "call" = "sms") => api.signInStart(phone, channel),
+    onSuccess: (r) => { setSentTo(r.to); setHow(r.channel === "call" ? "call" : "sms"); }, onError: fail,
+  });
   const check = useMutation({
     mutationFn: () => api.signInCheck(phone, code),
     onSuccess: (r) => { connect(server(), r.token); window.location.reload(); },
@@ -122,10 +126,11 @@ function PhoneSignIn({ onLink }: { onLink: () => void }) {
     <>
       <h1 className="text-[22px] font-medium tracking-tight">Sign in to Pathya</h1>
       <p className="text-[14px] text-muted-foreground">
-        {sentTo ? `We texted a code to ${sentTo}.` : "Your phone number, as it is in your family's Pathya. We'll text you a code."}
+        {sentTo ? (how === "call" ? `Pathya's number is calling ${sentTo} to read out a code.` : `We texted a code to ${sentTo}.`)
+          : "Your phone number, as it is in your family's Pathya. We'll text you a code."}
       </p>
       {!sentTo ? (
-        <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); if (phone.trim()) start.mutate(); }}>
+        <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); if (phone.trim()) start.mutate("sms"); }}>
           <input className={field} type="tel" inputMode="tel" autoComplete="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="98480 22338" autoFocus />
           <Button type="submit" className="w-full h-12" disabled={start.isPending || phone.replace(/\D/g, "").length < 10}>
             {start.isPending && <Loader2 className="animate-spin" />} Send code
@@ -138,9 +143,10 @@ function PhoneSignIn({ onLink }: { onLink: () => void }) {
           <Button type="submit" className="w-full h-12" disabled={check.isPending || code.length < 4}>
             {check.isPending && <Loader2 className="animate-spin" />} Sign in
           </Button>
-          <button type="button" className="w-full text-[13px] text-muted-foreground" disabled={start.isPending} onClick={() => { setCode(""); start.mutate(); }}>
-            Send a new code
-          </button>
+          <div className="flex justify-between gap-3 text-[13px] text-muted-foreground">
+            <button type="button" disabled={start.isPending} onClick={() => { setCode(""); start.mutate("sms"); }}>Text a new code</button>
+            <button type="button" disabled={start.isPending} onClick={() => { setCode(""); start.mutate("call"); }}>Call me with the code</button>
+          </div>
         </form>
       )}
       <button className="text-[13px] text-muted-foreground underline underline-offset-4" onClick={onLink}>I have a Pathya link instead</button>
@@ -197,7 +203,10 @@ const Index = () => {
   const [tab, setTab] = useState<Tab>("home");
   const [member, setMember] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
-  const { data: s, error } = useQuery({ queryKey: ["state"], queryFn: api.state, refetchInterval: 2000 });
+  const { data: s, error } = useQuery({
+    queryKey: ["state"], queryFn: api.state,
+    refetchInterval: (q) => (/key needed/i.test(q.state.error?.message ?? "") ? false : 2000),   // signed out: wait
+  });
 
   if (!s) {
     return error ? <Connect error={(error as Error).message} /> : (

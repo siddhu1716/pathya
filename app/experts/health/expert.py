@@ -350,12 +350,12 @@ class HealthExpert(Expert):
     def meds_card(self, patient, rx, photo=None):
         """rx is the prescription reader's output. Nothing is scheduled until a human confirms. photo: the stored
         photo (app/core/photos.py), shown on the card so the family can compare it with what was read."""
+        from app.experts.family import meds as M
         lines, warnings = [], []
         for m in rx.get("meds", []):
             when = "/".join(k for k in DOSE_HOURS if m.get(k)) or "timing unclear"
             days = f"for {m['days']} days" if m.get("days") else ""
-            lines.append(" ".join(str(x) for x in (m.get("name_as_written"), m.get("strength"), m.get("dose"),
-                                                  when, m.get("food"), days) if x))
+            lines.append(" ".join(str(x) for x in (M.line({**m, "food": None}), when, m.get("food"), days) if x))
             if m.get("unclear") or when == "timing unclear":
                 warnings.append(f"Check with the pharmacist: {m.get('name_as_written')}")
         warnings += [f"Could not read: {u}" for u in rx.get("unreadable_parts", [])]
@@ -438,7 +438,7 @@ class HealthExpert(Expert):
                 return {"ok": False, "error": "No such pharmacy on this card."}
             key = pharmacy.add_to_household(self.path, self.hh, found)
             return {"ok": True, "message": f"Added {found['name']} to your pharmacies (household.yaml). Calling them now.",
-                    "jobs": [self.call_pharmacy(p["patient"], key, p["meds"], p.get("photo"))]}
+                    "jobs": [self.call_pharmacy(p["patient"], key, p["meds"], p.get("photo"), p.get("via"))]}
         if kind == "pharmacy_answer" and choice == "whatsapp":
             return {"ok": True, "open": p.get("wa")}
         return {"ok": True}
@@ -450,7 +450,7 @@ class HealthExpert(Expert):
         return (last or {}).get("address") or self.hh.get("address") or self.hh.get("address_hint") or \
             "the family's address (they will share it on WhatsApp)"
 
-    def pharmacies_card(self, patient, found, meds, photo=None):
+    def pharmacies_card(self, patient, found, meds, photo=None, via=None):
         """Pharmacies near the family, found on the web with their source. Pathya phones one only after a tap."""
         name = self.person(patient).get("name", patient)
         rows = found["pharmacies"]
@@ -462,7 +462,8 @@ class HealthExpert(Expert):
                     question="Pathya can phone one to ask if they have these, the total and home delivery. "
                              "It does not order; you confirm on WhatsApp.",
                     choices=[{"id": f"call:{i}", "label": f"Phone {f['name'][:28]}"} for i, f in enumerate(rows)],
-                    payload={"patient": patient, "found": rows, "meds": meds, **({"photo": photo} if photo else {})})
+                    payload={"patient": patient, "found": rows, "meds": meds, **({"photo": photo} if photo else {}),
+                             **({"via": via} if via else {})})
 
     def call_pharmacy(self, patient, key, meds, photo=None, via=None):
         to = self.hh["pharmacies"][key]["phone"]

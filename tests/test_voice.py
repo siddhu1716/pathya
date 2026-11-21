@@ -55,3 +55,20 @@ def test_voice_api_and_the_prompt_viewer():
         assert p["who"] == "Amma" and "Say 'garu' after names." in p["prompt"] and "end_call" in p["tools"]
         assert p["voice"]["pace"] == "slow" and p["voice"]["voice"] == "coral"                 # Amma is 60
         assert c.get("/api/voice/prompt?who=nobody").status_code == 404
+
+
+def test_a_switch_of_language_is_told_to_the_model_once():
+    from app.core import lang
+    assert lang.heard("मैं गेट पर हूँ") == "Hindi" and lang.heard("నేను గేట్ దగ్గర ఉన్నాను") == "Telugu"
+    assert lang.heard("I am at the gate") is None and lang.heard("ok ఆ") is None               # too little to tell
+    f = lang.Follow("Telugu")
+    assert f.note("నమస్కారం అండి") is None                                                      # still Telugu
+    assert "speak only Hindi" in f.note("मैं स्विगी से बोल रहा हूँ") and f.note("ऑर्डर कहाँ लाऊँ?") is None
+    assert "speak only Telugu" in f.note("సరే, వస్తున్నాను")
+    app, store, _ = env()
+    with TestClient(app) as c:
+        from app.core.browser_call import Call
+        job = store.job(app.state.experts["home"].call_me(via="browser"))
+        app.state.calls[job["id"]] = Call(job, app.state.experts["home"], app.state.experts["home"].call_plan(job))
+        assert c.post(f"/api/calls/{job['id']}/line", json={"role": "them", "text": "हाँ, बोलिए"}).json()["note"]
+        assert c.post(f"/api/calls/{job['id']}/line", json={"role": "ai", "text": "हाँ जी"}).json()["note"] is None

@@ -2,6 +2,7 @@
 import asyncio
 import os
 import sys
+import time
 
 import pytest
 import yaml
@@ -117,7 +118,14 @@ def test_pharmacy_found_near_you_is_added_only_after_a_tap_and_the_call_never_or
         assert c.post("/api/health/pharmacy", json={"who": "amma"}).status_code == 400          # no location, no area
         assert c.post("/api/health/pharmacy", json={"who": "me", "area": "Madhapur"}).status_code == 400   # no medicines
         r = c.post("/api/health/pharmacy", json={"who": "amma", "lat": 17.4486, "lng": 78.3908}).json()
-        assert seen["lat"] == 17.4486 and r["count"] == 1
+        assert r == {"searching": True, "medicines": 1}
+        for _ in range(50):                                                                     # found in the background
+            found = [x for x in store.cards() if x["card"]["kind"] == "pharmacies"]
+            if found:
+                break
+            time.sleep(0.1)
+        assert seen["lat"] == 17.4486 and found and "Apollo Pharmacy Madhapur" in found[0]["card"]["lines"][0]
+        r["card"] = found[0]["id"]
         assert "apollo" not in path.read_text(encoding="utf-8").lower()                          # nothing added yet
         links = c.get("/api/health/pharmacy/links?who=amma").json()
         assert links[0]["links"]["Tata 1mg"] == "https://www.1mg.com/search/all?name=Simvotin%2010mg"

@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { Loader2, LocateFixed, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } from "@/components/ui/drawer";
-import { api, Member } from "@/lib/api";
+import { api, Member, ringIn } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 const field = "w-full rounded-xl border bg-white/[0.03] px-3 py-2.5 text-[15px] outline-none focus:border-white/30";
@@ -19,9 +19,10 @@ export function PharmacySheet({ m, open, onClose }: { m: Member; open: boolean; 
   const [denied, setDenied] = useState(false);
   const { data: links } = useQuery({ queryKey: ["pharmacy-links", m.key], queryFn: () => api.pharmacyLinks(m.key), enabled: open });
   const find = useMutation({
-    mutationFn: (where: { lat?: number; lng?: number; area?: string }) => api.findPharmacy({ who: m.key, meds: picked, ...where }),
-    onSuccess: (r) => {
-      toast.success(`Found ${r.count} near ${r.area}. Pick one on the card on Home.`);
+    mutationFn: (where: { lat?: number; lng?: number; area?: string }) =>
+      api.findPharmacy({ who: m.key, meds: picked, ...where, ...(ringIn() === "browser" ? { via: "browser" } : {}) }),
+    onSuccess: () => {
+      toast.success("Searching for pharmacies near you. A card appears on Home in about a minute.");
       qc.invalidateQueries({ queryKey: ["state"] });
       onClose();
     },

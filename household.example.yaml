@@ -19,6 +19,7 @@ clinics:
     doctor: "Dr. Rao (placeholder)"
     clinic: "Sunrise Clinic, Gachibowli (placeholder)"
     phone: "+91XXXXXXXXXX"
+# pharmacies: the app adds one here after you tap "Phone <pharmacy>" (Family > Medicines > Order these medicines)
 address_hint: Loft
 # Kitchen preferences for meal plans (the planner never gives diet advice; the doctor's written advice is used
 # only to choose dishes). Nutrition targets are optional: set them with your nutritionist; otherwise a general

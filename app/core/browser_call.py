@@ -9,7 +9,7 @@ import time
 
 import httpx
 
-from app.core import convo
+from app.core import convo, lang
 
 REALTIME_URL = "https://api.openai.com/v1/realtime/calls"
 
@@ -78,6 +78,7 @@ class Call:
         self.deadline = self.started + plan.max_minutes * 60
         self.ended = False
         self.tools = {f.__name__: f for f in plan.tools}
+        self.follow = lang.Follow(getattr(plan, "language", "") or "Telugu")
 
     async def run_tool(self, name, arguments):
         """Run one tool the model asked for. Unknown tools and calls past the time limit are refused."""
