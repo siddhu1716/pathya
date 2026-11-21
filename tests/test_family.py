@@ -125,6 +125,19 @@ def test_food_log_per_person_and_health_score_from_habits_only():
     assert "never count" in amma["about"] and set(S.WEIGHTS) == {"food", "medicines", "movement", "checkins"}
 
 
+def test_check_in_part_never_expects_fewer_days_than_were_answered():
+    from datetime import datetime
+    store = Store(":memory:")
+    now = datetime.now(M.IST).replace(hour=10, minute=0, second=0, microsecond=0).timestamp()
+    store.remember("amma", "call:1", {"summary": "yesterday"}, "t")
+    store.remember("amma", "call:2", {"summary": "today"}, "t")
+    store.remember("amma", "daily", {"hour": 19}, "t")
+    store.db.execute("UPDATE facts SET updated=? WHERE key='call:1'", (now - 86400,))
+    store.db.execute("UPDATE facts SET updated=? WHERE key IN ('call:2','daily')", (now - 3600,))
+    part = S.checkins(store, P.member(HH, store, "amma"), S._days(now), 19, now)
+    assert part["value"] == 1 and part["detail"] == "Answered check-in calls on 2 of the last 2 days."
+
+
 def test_parents_get_the_daily_check_in_by_default_unless_switched_off():
     store = Store(":memory:")
     home = HomeExpert(store, HH)

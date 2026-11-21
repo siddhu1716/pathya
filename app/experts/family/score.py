@@ -91,7 +91,10 @@ def checkins(store, m, days, daily_hour, now):
     answered = {datetime.fromtimestamp(f["updated"], IST).date() for f in store.facts(m["key"], "call:")
                 if f["updated"] >= since}
     started = next((f["updated"] for f in store.facts(m["key"], "daily") if f["key"] == "daily"), since)
-    expected = max(1, min(DAYS, (datetime.fromtimestamp(now, IST).date() - datetime.fromtimestamp(started, IST).date()).days))
+    today = datetime.fromtimestamp(now, IST)
+    due = (today.date() - datetime.fromtimestamp(started, IST).date()).days + (today.hour >= daily_hour)
+    # Calls made before the daily call was switched on still count, so never expect fewer days than were answered.
+    expected = max(1, min(DAYS, due), len(answered))
     value = min(1, len(answered) / expected)
     return {"value": value, "detail": f"Answered check-in calls on {len(answered)} of the last {expected} days.",
             "tips": [] if value >= 1 else ["Missed calls ring again the next evening."]}
