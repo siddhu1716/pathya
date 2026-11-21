@@ -132,7 +132,18 @@ def test_ring_in_browser_override_and_failed_call_card(monkeypatch):
     with TestClient(app) as client:
         client.post("/calls/status", data={"CallSid": "CA77", "CallStatus": "failed", "CallDuration": "0"})
     card = store.cards()[0]["card"]
-    assert "did not connect" in card["title"] and "Shiva" in card["title"]
+    assert "ringing in the app" in card["title"] and "Jio" in card["lines"][0]             # your phone refused it
+    again = [j for j in store.upcoming() if j["person"] == "me"][-1]
+    assert again["payload"]["via"] == "browser" and again["kind"] == "home"
+    assert dial("+919800000000", home.call_me()) == "browser" and len(dialled) == 1          # next calls ring the app
+    amma = home.call("amma")
+    assert dial("+919800000001", amma) == "CA77"                                           # others still get phone calls
+    store.start_job(amma)
+    store.end_job(amma, True, {"call_sid": "CA78"})
+    with TestClient(app) as client:
+        client.post("/calls/status", data={"CallSid": "CA78", "CallStatus": "failed", "CallDuration": "0"})
+        fwd = client.get("/api/setup/forwarding").json()
+    assert any("did not connect" in c["card"]["title"] and "Amma" in c["card"]["title"] for c in store.cards())
     from app.main import _check_stream_started
     asyncio.run(_check_stream_started(app.state, jid, "Shiva", wait=0))          # completed, but no audio stream
     assert any("press" in c["card"]["title"] and "trial" in c["card"]["lines"][0] for c in store.cards())
@@ -197,3 +208,30 @@ def test_app_key_guards_the_api(monkeypatch):
         assert client.get("/api/state?key=s3cret-key-123").json()["user"] == "Shiva"
         r = client.post("/api/orders/nope/delivered", headers={"X-QuickPick-Key": "s3cret-key-123"})
         assert r.status_code == 404
+
+
+def test_one_check_in_call_also_takes_notes_for_the_doctor(monkeypatch):
+    app, store, kitchen = env()
+    home = app.state.experts["home"]
+    job = store.job(home.call("amma"))
+    plan = home.call_plan(job)
+    t = {f.__name__: f for f in plan.tools}
+    assert "note_for_doctor" in t and "how they are feeling" in plan.instructions and "Never judge" in plan.instructions
+    t["note_for_doctor"]("knees hurt more", ["knee pain"], "3 days", ["BP 140/90 this morning"], ["Can I walk daily?"],
+                         "mokallu noppi ekkuva ga undi")
+    t["end_call"]("Checked in", True, "all_done")
+    asyncio.run(home.after_call(job, plan.saved))
+    brief = next(c["card"] for c in store.cards() if c["card"]["kind"] == "brief")
+    text = "\n".join(brief["lines"])
+    assert "mokallu noppi" in text and "BP 140/90 this morning" in text and "Can I walk daily?" in text
+
+
+def test_forwarding_setup(monkeypatch):
+    app, store, _ = env()
+    monkeypatch.setenv("EXOTEL_NUMBER", "09513886363")
+    monkeypatch.setenv("EXOTEL_STREAM_SECRET", "s" * 32)
+    monkeypatch.setenv("PUBLIC_HOST", "abc.trycloudflare.com")
+    with TestClient(app) as client:
+        f = client.get("/api/setup/forwarding").json()
+    assert f["number"] == "9513886363" and f["codes"][0]["on"] == "*403*9513886363#" and f["off_all"] == "##002#"
+    assert f["voicebot_url"] == "wss://quickpick:" + "s" * 32 + "@abc.trycloudflare.com/exotel"

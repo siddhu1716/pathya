@@ -36,6 +36,9 @@ What you can do:
 - Medicines: only if medicines are due today, ask once whether they took them, reading names exactly as written, and
   call medicine_taken with taken (yes, no or not_sure) and their answer in their words. {no_advice}
 - Ran out: when they say something is finished, call ran_out with those items, and offer to add them to the order.
+- Health and the doctor: ask once, gently, how they are feeling{visit}. If they mention a new problem, a BP or sugar
+  reading, or something to ask the doctor, call note_for_doctor with their words (anything new and since when, readings
+  exactly as they say them, their questions). Never judge, interpret or explain any of it. {no_advice}
 - Meal ideas: if asked what to eat or cook, suggest one or two simple home dishes from what is at home that fit their
   goal and plate notes (for example less sugar: no sweets, tea without sugar). Ideas only: never mention illnesses,
   numbers or targets, and never give medical or diet advice.
@@ -175,7 +178,7 @@ class HomeExpert(Expert):
             eaten="; ".join(x["text"] for x in eaten["meals"]) or "nothing noted yet",
             at_home=", ".join(i["name"] for i in shelf[:25]) or "nothing recorded",
             low=", ".join(i["name"] for i in shelf if i["low"]) or "nothing", plate=self.plate(m) or "none",
-            notes=", ".join(guard.notes_of(m)) or "none", elder=self._elder(m),
+            notes=", ".join(guard.notes_of(m)) or "none", elder=self._elder(m), visit=self._visit(who),
             no_advice=NO_ADVICE, emergency=EMERGENCY), greeting, max_minutes=8 if m["elder"] else 6, language=language)
         s = plan.saved
 
@@ -194,12 +197,19 @@ class HomeExpert(Expert):
             s["meds"] = {"taken": taken, "words": their_words}
             return "Noted. Do not comment on it."
 
+        def note_for_doctor(feeling: str, new_symptoms: list[str], since: str, readings: list[str], questions: list[str],
+                            their_words: str) -> str:
+            """What they said about their health, in their words, for the doctor brief. Do not judge or interpret it."""
+            s["doctor"] = {"feeling": feeling, "new_symptoms": new_symptoms, "since": since, "readings": readings,
+                           "questions": questions, "her_words": their_words, "summary_en": feeling}
+            return "Noted for the doctor. Do not comment on it."
+
         def ran_out(items: list[str]) -> str:
             """Items that are finished at home."""
             s["ran_out"] = sorted(set(s.get("ran_out", []) + items))
             return "Noted. Offer to add them to the order."
 
-        plan.tools = [set_order, log_food, medicine_taken, ran_out, self._alert(m, s), convo.end_call_tool(s)]
+        plan.tools = [set_order, log_food, medicine_taken, note_for_doctor, ran_out, self._alert(m, s), convo.end_call_tool(s)]
         return plan
 
     def _meds_plan(self, job):
@@ -220,6 +230,18 @@ class HomeExpert(Expert):
 
         plan.tools = [dose_taken, self._alert(m, s), convo.end_call_tool(s)]
         return plan
+
+    def _visit(self, who):
+        """An appointment coming up in the next 7 days: then also ask what they want to ask the doctor."""
+        from app.experts.health.expert import to_ist
+        now = time.time()
+        for row in self.store.cards("done"):
+            p = row["card"].get("payload") or {}
+            if row["card"]["kind"] == "booking" and p.get("patient") == who:
+                when = to_ist(p["slot"])
+                if now < when.timestamp() < now + 7 * 86400:
+                    return f" (they see {p.get('doctor') or 'the doctor'} on {when:%a %d %b}: also ask what they want to ask)"
+        return ""
 
     def _elder(self, m):
         """Older members: slower, gentler, and alert the family on the signs ICOPE asks about (no judging, no advice)."""
@@ -278,6 +300,12 @@ class HomeExpert(Expert):
                              question="Pathya only reminds. Talk to them if you need to.",
                              choices=[{"id": "call", "label": f"Call {m['name']} again"}, {"id": "ok", "label": "OK"}],
                              payload={"who": who})
+        if saved.get("doctor"):
+            from app.experts.health.expert import HealthExpert
+            d = {**saved["doctor"], "her_words": safety.check(saved["doctor"].get("her_words") or "").text}
+            self.store.remember(who, f"checkin:{job['id']}", d, "family check-in call")
+            self.store.add_card(HealthExpert(self.store, self.hh).brief_card(who).to_dict())
+            lines.append("Noted for the doctor: a brief is ready to share.")
         if saved.get("ran_out"):
             gone = pantry.used_up(self.store, saved["ran_out"])
             lines.append("Finished at home: " + ", ".join(saved["ran_out"]) + (f" ({len(gone)} off the shelf)" if gone else ""))

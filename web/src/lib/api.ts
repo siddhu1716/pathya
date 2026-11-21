@@ -229,6 +229,7 @@ export const api = {
     post<MealPlan>("/api/kitchen/mealplan/portion", { day, meal, part, who, qty }),
   fit: (day: number, who: string) => post<MealPlan>("/api/kitchen/mealplan/fit", { day, who }),
   intake: (who: string) => post<{ job: string }>(`/api/health/intake/${who}${via()}`),
+  forwarding: () => request<Forwarding>("/api/setup/forwarding"),
   bookRequest: (b: { patient: string; hospital: string; doctor: string; area: string; reason: string; from_date: string; to_date: string; part: string }) =>
     post<{ card: string }>("/api/health/request", b),
 };
@@ -243,6 +244,8 @@ export type ScanResult =
   | { kind: "body_report"; note: string; report: BodyReport }
   | { kind: "other"; note: string };
 export type Checkup = { what: string; why: string; source: string };
+export type Forwarding = { number: string | null; voicebot_url: string | null; codes: { when: string; on: string; off: string }[];
+  off_all: string; other_networks: string };
 
 export type Targets = Macros & { sugar_g: number; salt_g: number; source: string };
 export type Dose = { slot: string; hour: number; meds: string[]; taken: "yes" | "no" | "not_sure" | null; words: string | null };

@@ -10,7 +10,8 @@ import { KitchenTab } from "@/components/KitchenTab";
 import { Dot, Panel, Pill, Section } from "@/components/kit";
 import { LiveCallBanner } from "@/components/LiveCall";
 import { OrderTracker } from "@/components/OrderTracker";
-import { CallSettings, QuickActions } from "@/components/QuickActions";
+import { CallSettings, Forwarding, QuickActions } from "@/components/QuickActions";
+import { PhoneIncoming } from "lucide-react";
 import { Timeline } from "@/components/Timeline";
 import { UpNext } from "@/components/UpNext";
 import { AtHome } from "@/components/HomeStock";
@@ -62,9 +63,20 @@ function Connect({ error }: { error: string }) {
     <div className="min-h-[100dvh] max-w-sm mx-auto px-6 flex flex-col justify-center gap-4">
       <h1 className="text-[22px] font-medium tracking-tight">Connect to Pathya</h1>
       <p className="text-[14px] text-muted-foreground">{error}</p>
-      <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); connect(srv, k); window.location.reload(); }}>
-        <input className={field} value={srv} onChange={(e) => setSrv(e.target.value)} placeholder="Server (blank = this site), https://….trycloudflare.com" />
-        <input className={field} value={k} onChange={(e) => setK(e.target.value)} placeholder="Key (from scripts/phone.py)" />
+      <p className="text-[14px] text-muted-foreground">Paste your Pathya link (the one with ?key=). Apps added to the Home Screen need it once.</p>
+      <form className="space-y-3" onSubmit={(e) => {
+        e.preventDefault();
+        let s2 = srv.trim(), k2 = k.trim();
+        try {
+          const u = new URL(s2);
+          k2 = k2 || u.searchParams.get("key") || "";
+          s2 = u.origin === window.location.origin ? "" : u.origin;
+        } catch { /* not a link: a bare server or blank */ }
+        connect(s2, k2);
+        window.location.reload();
+      }}>
+        <input className={field} value={srv} onChange={(e) => setSrv(e.target.value)} placeholder="https://….trycloudflare.com/?key=…" />
+        <input className={field} value={k} onChange={(e) => setK(e.target.value)} placeholder="Key (if not in the link)" />
         <Button type="submit" className="w-full h-12">Connect</Button>
       </form>
     </div>
@@ -111,6 +123,13 @@ const Index = () => {
 
       <main className="max-w-xl mx-auto px-4 pt-5 pb-28 space-y-7">
         {s.live.map((c) => <LiveCallBanner key={c.id} call={c} />)}
+        {s.ringing.map((j) => (
+          <a key={j.id} href={`/call/${j.id}`} className="flex items-center gap-3 rounded-2xl border border-success/40 bg-success/5 px-4 py-3.5">
+            <PhoneIncoming className="w-5 h-5 text-success voice-pulse" />
+            <span className="flex-1 text-[15px]">Pathya is calling {j.person === "me" ? "you" : s.people.find((p) => p.key === j.person)?.name ?? j.person}</span>
+            <span className="rounded-full bg-success text-success-foreground px-3 h-8 leading-8 text-[13px]">Answer</span>
+          </a>
+        ))}
 
         {tab === "home" && (
           <>
@@ -137,8 +156,8 @@ const Index = () => {
 
             <Section label="Do something"><QuickActions state={s} onScan={() => setScanning(true)} onMeals={() => go("meals")} /></Section>
 
-            {(s.jobs.length > 0 || s.ringing.length > 0) && (
-              <Section label="Up next"><UpNext jobs={s.jobs} ringing={s.ringing} people={s.people} /></Section>
+            {s.jobs.length > 0 && (
+              <Section label="Up next"><UpNext jobs={s.jobs} ringing={[]} people={s.people} /></Section>
             )}
 
             <RunningLow s={s} />
@@ -159,6 +178,7 @@ const Index = () => {
         {tab === "more" && (
           <>
             <Section label="Calls"><CallSettings state={s} /></Section>
+            <Section label="Answer my calls"><Forwarding /></Section>
             <Section label="Call history"><CallHistory /></Section>
             {s.recent.length > 0 && (
               <Section label="Recently handled">

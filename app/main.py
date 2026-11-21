@@ -43,6 +43,15 @@ def twilio_ready():
             and "." in os.getenv("PUBLIC_HOST", "") and "xxxx" not in os.getenv("PUBLIC_HOST", ""))
 
 
+REFUSED_FOR = 24 * 3600
+
+
+def phone_refused(store, now=None):
+    """The user's own phone refused a call recently (Jio rejects Twilio's US number): ring them in the app instead."""
+    f = next((x["value"] for x in store.facts("me", "phone_refused") if x["key"] == "phone_refused"), None)
+    return bool(f) and (now or time.time()) - f.get("ts", 0) < REFUSED_FOR
+
+
 def make_dialer(store, twilio_client=None):
     """Real phone calls with a Twilio client (CALL_MODE=twilio and valid settings); otherwise calls ring in the browser.
     A job with payload via=browser always rings in the browser (the UI's "Ring: this browser")."""
@@ -60,7 +69,9 @@ def make_dialer(store, twilio_client=None):
 
     def dial(to, job_id):
         job = store.job(job_id)
-        return ring_in_browser(to, job_id) if job and job["payload"].get("via") == "browser" else phone(to, job_id)
+        if job and (job["payload"].get("via") == "browser" or (job["person"] == "me" and phone_refused(store))):
+            return ring_in_browser(to, job_id)
+        return phone(to, job_id)
     return dial
 
 
@@ -146,6 +157,20 @@ def _who(hh, key):
         return hh["user"]["name"]
     p = hh["people"].get(key) or hh["clinics"].get(key) or {}
     return p.get("name") or p.get("clinic") or ("Unknown caller" if key == "caller" else key)
+
+
+@api.get("/setup/forwarding")
+def forwarding(request: Request):
+    """'Answer my calls': forward the user's own phone (when busy / unanswered) to an Indian number that runs Pathya.
+    Jio cannot forward to Twilio's US number, so it is the Exotel number (Voicebot applet -> wss://.../exotel)."""
+    number = re.sub(r"\D", "", os.getenv("EXOTEL_NUMBER", ""))[-10:]
+    host, secret = os.getenv("PUBLIC_HOST", ""), os.getenv("EXOTEL_STREAM_SECRET", "")
+    return {"number": number or None,
+            "voicebot_url": f"wss://quickpick:{secret}@{host}/exotel" if number and len(secret) >= 16 and "." in host else None,
+            "codes": [{"when": "Not answered", "on": f"*403*{number}#", "off": "##403#"},
+                      {"when": "Busy", "on": f"*405*{number}#", "off": "##405#"},
+                      {"when": "Unreachable", "on": f"*409*{number}#", "off": "##409#"}] if number else [],
+            "off_all": "##002#", "other_networks": f"**61*+91{number}# (not answered), **67*+91{number}# (busy)" if number else ""}
 
 
 @api.get("/calls")
@@ -1042,6 +1067,14 @@ def build_app(lifespan=None) -> FastAPI:
         if not job:
             return PlainTextResponse("")
         who = _who(st.household, job["person"])
+        if status == "failed" and job["person"] == "me" and job["payload"].get("via") != "browser":
+            store.remember("me", "phone_refused", {"ts": time.time(), "number_end": _digits(job["payload"].get("to"))[-4:]}, "twilio")
+            again = store.add_job(job["expert"], job["kind"], "me", {**job["payload"], "via": "browser"})
+            _call_problem(store, "Your phone refused the call, so it is ringing in the app",
+                          "Your network (Jio) does not take calls from Twilio's US number. Tap Answer in the app. "
+                          "For real phone calls, put a non-Jio number for yourself in household.yaml.")
+            store.log("caller", again, "re-ringing in the app after the phone refused")
+            return PlainTextResponse("")
         if status in ("failed", "busy", "no-answer", "canceled"):          # say so in the app, not only in the log
             hint = ("The phone network refused the call. Jio blocks international numbers; try another number, "
                     "or set 'Calls ring on: This browser'.") if status == "failed" else "Nobody answered."
@@ -1139,6 +1172,8 @@ def build_app(lifespan=None) -> FastAPI:
                 pass
 
     dist = ROOT / "web" / "dist"
+    import mimetypes
+    mimetypes.add_type("application/manifest+json", ".webmanifest")
 
     @app.get("/{path:path}", include_in_schema=False)
     def spa(path: str):

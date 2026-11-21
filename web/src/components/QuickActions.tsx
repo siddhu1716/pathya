@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { ArrowUp, Camera, Loader2, MessageCircle, PhoneCall, PhoneOutgoing, ShoppingBasket, Stethoscope, UtensilsCrossed } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -203,6 +203,39 @@ function Doctor({ state, done, fail }: { state: AppState; done: (m: string) => v
         </form>
       )}
     </div>
+  );
+}
+
+/** More tab: forward your own phone to Pathya (Jio can only forward to an Indian number: the Exotel one). */
+export function Forwarding() {
+  const { data: f } = useQuery({ queryKey: ["forwarding"], queryFn: api.forwarding });
+  if (!f) return null;
+  if (!f.number) return <Panel className="px-4 py-3 text-[14px] text-muted-foreground">Set EXOTEL_NUMBER in .env to the Exotel number your phone forwards to.</Panel>;
+  const copy = (t: string) => navigator.clipboard?.writeText(t).then(() => toast.success("Copied")).catch(() => undefined);
+  return (
+    <Panel className="p-4 space-y-3">
+      <p className="text-[14px]">When you can't pick up, your phone forwards the call to <span className="font-mono">{f.number}</span> and Pathya answers:
+        it says it is your AI assistant, takes Amma's order or guides the delivery partner, and tells you here.</p>
+      <ol className="text-[13px] space-y-1.5 list-decimal pl-5 text-muted-foreground">
+        <li>Exotel: in the call flow for {f.number}, add a <b>Voicebot</b> step with the URL below, then Hangup.</li>
+        <li>On your Jio phone, dial a code below (tap to copy). Other networks: {f.other_networks}.</li>
+        <li>Test: call your own number from another phone and let it ring.</li>
+      </ol>
+      {f.voicebot_url && <button onClick={() => copy(f.voicebot_url!)} className="w-full text-left font-mono text-[11px] break-all rounded-xl border p-3">{f.voicebot_url}</button>}
+      <div className="divide-y rounded-xl border">
+        {f.codes.map((c) => (
+          <div key={c.when} className="flex items-center justify-between px-3 py-2 text-[13px]">
+            <span>{c.when}</span>
+            <span className="flex gap-2">
+              <button className="font-mono rounded-full border px-2 py-0.5" onClick={() => copy(c.on)}>{c.on}</button>
+              <button className="font-mono text-muted-foreground" onClick={() => copy(c.off)}>{c.off}</button>
+            </span>
+          </div>
+        ))}
+      </div>
+      <p className="text-[12px] text-muted-foreground">Trial Exotel numbers ask callers for a PIN; a dedicated Exotel number (after KYC) does not.
+        Cancel all forwarding with <span className="font-mono">{f.off_all}</span>.</p>
+    </Panel>
   );
 }
 

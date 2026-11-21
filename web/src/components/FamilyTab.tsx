@@ -406,7 +406,6 @@ function MemberPage({ m, fam, onBack }: { m: Member; fam: Family; onBack: () => 
   const refresh = useRefresh();
   const fail = (e: Error) => toast.error(e.message);
   const call = useMutation({ mutationFn: () => api.callMember(m.key), onSuccess: () => { toast.success("Calling"); refresh(); }, onError: fail });
-  const doctorQs = useMutation({ mutationFn: () => api.checkin(m.key), onSuccess: () => { toast.success("Calling about the doctor's visit"); refresh(); }, onError: fail });
   const daily = useMutation({ mutationFn: () => api.dailyMember(m.key, m.daily_hour == null ? 20 : null), onSuccess: refresh, onError: fail });
   const [scanning, setScanning] = useState(false);
   const [watchHelp, setWatchHelp] = useState(false);
@@ -428,13 +427,15 @@ function MemberPage({ m, fam, onBack }: { m: Member; fam: Family; onBack: () => 
           <p className="text-[13px] pt-0.5">{fam.goals[m.goal] ?? m.goal} · <button className="underline underline-offset-4 text-muted-foreground" onClick={() => setScore(true)}>{m.health.label}</button></p>
         </div>
       </div>
-      <div className="grid grid-cols-4 gap-2">
-        <Chip icon={PhoneOutgoing} label={m.key === "me" ? "Call me" : "Call now"} onClick={() => call.mutate()} disabled={!m.has_phone || call.isPending} />
+      <div className="grid grid-cols-3 gap-2">
+        <Chip icon={PhoneOutgoing} label={m.key === "me" ? "Call me" : `Call ${m.name}`} onClick={() => call.mutate()} disabled={!m.has_phone || call.isPending} />
         <Chip icon={Camera} label="Scan" onClick={() => setScanning(true)} />
         <Chip icon={HeartPulse} label={m.daily_hour == null ? "Daily call off" : `Daily ${m.daily_hour}:00`} on={m.daily_hour != null}
               onClick={() => daily.mutate()} disabled={!m.has_phone || daily.isPending} />
-        <Chip icon={Stethoscope} label="Doctor questions" onClick={() => doctorQs.mutate()} disabled={!m.has_phone || doctorQs.isPending} />
       </div>
+      <p className="text-[12px] text-muted-foreground px-1 -mt-3">
+        One call covers meals, medicines, groceries, how {who(m)} {m.key === "me" ? "feel" : "feels"} and questions for the doctor.
+      </p>
       {!m.has_phone && <p className="text-[12px] text-muted-foreground px-1">No phone in household.yaml, so Pathya can't call {m.name}. Everything else works.</p>}
       {m.watch.length > 0 && (
         <Panel className="p-4 space-y-1 border-warning/40">
