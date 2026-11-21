@@ -13,14 +13,18 @@ SERVERS = {
     "swiggy-dineout": "https://mcp.swiggy.com/dineout",
     "zepto": "https://mcp.zepto.co.in/mcp",
 }
+# Zepto's sign-in only accepts redirect URIs on "localhost"; mcp-remote defaults to 127.0.0.1 (403 at registration).
+EXTRA_ARGS = {"zepto": ["--host", "localhost"]}
 
 
 async def main(name, schema):
-    server = MCPServerStdio(name=name, params={"command": "npx", "args": ["-y", "mcp-remote", SERVERS[name]]},
+    server = MCPServerStdio(name=name, params={"command": "npx",
+                                               "args": ["-y", "mcp-remote", SERVERS[name], *EXTRA_ARGS.get(name, [])]},
                             client_session_timeout_seconds=120)
     async with server:
         tools = await server.list_tools()
-    rows = [{"name": t.name, "description": (t.description or "").strip(), "input_schema": t.inputSchema} for t in tools]
+    rows = [{"name": t.name, "description": (t.description or "").strip(),
+             "input_schema": getattr(t, "input_schema", None) or getattr(t, "inputSchema", None)} for t in tools]
     out = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "docs", "mcp_tools")
     os.makedirs(out, exist_ok=True)
     with open(os.path.join(out, f"{name}.json"), "w", encoding="utf-8") as f:
