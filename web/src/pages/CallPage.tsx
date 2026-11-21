@@ -4,7 +4,7 @@ import { Loader2, Phone, PhoneOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dot } from "@/components/kit";
 import { Bubbles } from "@/components/LiveCall";
-import { api } from "@/lib/api";
+import { api, apiFetch } from "@/lib/api";
 
 type Line = { role: "ai" | "them" | "tool"; text: string };
 type Info = { id: string; kind: string; expert: string; who: string; user: string; done: boolean };
@@ -34,7 +34,7 @@ export default function CallPage() {
   };
 
   useEffect(() => {
-    fetch(`/api/calls/${id}`)
+    apiFetch(`/api/calls/${id}`)
       .then(async (r) => (r.ok ? r.json() : Promise.reject(new Error((await r.json()).detail))))
       .then((i: Info) => {
         setInfo(i);
@@ -66,7 +66,7 @@ export default function CallPage() {
     dc.current?.close();
     pc.current?.close();
     setPhase("ended");
-    await fetch(`/api/calls/${id}/end`, {
+    await apiFetch(`/api/calls/${id}/end`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ transcript: transcript.current }),
@@ -83,7 +83,7 @@ export default function CallPage() {
         if (ev.transcript?.trim()) add({ role: "ai", text: ev.transcript.trim() });
         break;
       case "response.function_call_arguments.done": {
-        const r = await fetch(`/api/calls/${id}/tool`, {
+        const r = await apiFetch(`/api/calls/${id}/tool`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ name: ev.name, arguments: ev.arguments }),
@@ -124,7 +124,7 @@ export default function CallPage() {
       dc.current = channel;
       channel.onmessage = onEvent;
       channel.onopen = async () => {
-        const g = await fetch(`/api/calls/${id}/greeting`).then((r) => r.json());
+        const g = await apiFetch(`/api/calls/${id}/greeting`).then((r) => r.json());
         limit.current = (g.max_minutes ?? 5) * 60;
         setPhase("live");
         send({
@@ -134,7 +134,7 @@ export default function CallPage() {
       };
       const offer = await conn.createOffer();
       await conn.setLocalDescription(offer);
-      const r = await fetch(`/api/calls/${id}/sdp`, { method: "POST", headers: { "Content-Type": "application/sdp" }, body: offer.sdp });
+      const r = await apiFetch(`/api/calls/${id}/sdp`, { method: "POST", headers: { "Content-Type": "application/sdp" }, body: offer.sdp });
       if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail ?? `Call failed (${r.status})`);
       await conn.setRemoteDescription({ type: "answer", sdp: await r.text() });
     } catch (e) {

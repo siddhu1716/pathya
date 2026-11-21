@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { History, Home, Loader2, Package, PhoneCall, UtensilsCrossed } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { ApprovalCard } from "@/components/ApprovalCard";
 import { CallHistory } from "@/components/CallHistory";
 import { KitchenTab } from "@/components/KitchenTab";
@@ -10,7 +11,8 @@ import { OrderTracker } from "@/components/OrderTracker";
 import { AskBox, StartActions } from "@/components/StartActions";
 import { Timeline } from "@/components/Timeline";
 import { UpNext } from "@/components/UpNext";
-import { api, AppState } from "@/lib/api";
+import { AtHome } from "@/components/HomeStock";
+import { api, AppState, connect, key, server } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 type Tab = "home" | "kitchen" | "orders" | "calls" | "activity";
@@ -21,27 +23,6 @@ const TABS: { id: Tab; label: string; icon: typeof Home }[] = [
   { id: "calls", label: "Calls", icon: PhoneCall },
   { id: "activity", label: "Activity", icon: History },
 ];
-
-function HowItWorks() {
-  const steps = [
-    ["01", "QuickPick talks", "It calls Amma or the cook, or answers when they call, in their language."],
-    ["02", "You tap once", "A card shows the exact cart, total and address. Nothing happens until you tap."],
-    ["03", "It's tracked", "The order is placed and followed to your door. Delivery calls are answered too."],
-  ];
-  return (
-    <Panel className="divide-y">
-      {steps.map(([n, t, d]) => (
-        <div key={n} className="flex gap-4 px-4 py-3.5">
-          <span className="font-mono text-[12px] text-muted-foreground pt-0.5">{n}</span>
-          <div>
-            <p className="text-[15px]">{t}</p>
-            <p className="text-[13px] text-muted-foreground">{d}</p>
-          </div>
-        </div>
-      ))}
-    </Panel>
-  );
-}
 
 function Lines({ s }: { s: AppState }) {
   const items: [string, boolean][] = [
@@ -64,21 +45,42 @@ function Lines({ s }: { s: AppState }) {
   );
 }
 
+function AtHomeSection({ s }: { s: AppState }) {
+  const { data } = useQuery({ queryKey: ["kitchen"], queryFn: api.kitchen, refetchInterval: 5000 });
+  if (!data?.pantry.length) return null;
+  return <Section label="At home"><AtHome state={s} compact /></Section>;
+}
+
+/** Shown when the server can't be reached: the UI may be hosted (Vercel) and need the tunnel URL and key. */
+function Connect({ error }: { error: string }) {
+  const [srv, setSrv] = useState(server());
+  const [k, setK] = useState(key());
+  const field = "w-full rounded-xl border bg-white/[0.03] px-3 py-2.5 text-[15px] outline-none focus:border-white/30";
+  return (
+    <div className="min-h-[100dvh] max-w-sm mx-auto px-6 flex flex-col justify-center gap-4">
+      <h1 className="text-[22px] font-medium tracking-tight">Connect to QuickPick</h1>
+      <p className="text-[14px] text-muted-foreground">{error}</p>
+      <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); connect(srv, k); window.location.reload(); }}>
+        <input className={field} value={srv} onChange={(e) => setSrv(e.target.value)} placeholder="Server (blank = this site), https://….trycloudflare.com" />
+        <input className={field} value={k} onChange={(e) => setK(e.target.value)} placeholder="Key (from scripts/phone.py)" />
+        <Button type="submit" className="w-full h-12">Connect</Button>
+      </form>
+    </div>
+  );
+}
+
 const Index = () => {
   const [tab, setTab] = useState<Tab>("home");
   const { data: s, error } = useQuery({ queryKey: ["state"], queryFn: api.state, refetchInterval: 2000 });
 
   if (!s) {
-    return (
-      <div className="min-h-[100dvh] flex items-center justify-center text-muted-foreground gap-2 px-6 text-center">
-        {error ? `Can't reach QuickPick. Is the server running? (${(error as Error).message})` : <><Loader2 className="animate-spin" /> Loading</>}
-      </div>
+    return error ? <Connect error={(error as Error).message} /> : (
+      <div className="min-h-[100dvh] flex items-center justify-center text-muted-foreground gap-2"><Loader2 className="animate-spin" /> Loading</div>
     );
   }
 
   const active = s.orders.filter((o) => !o.delivered && o.store !== "dry run");
   const cards = s.cards;
-  const quiet = !cards.length && !active.length && !s.live.length && !s.jobs.length && !s.ringing.length;
 
   return (
     <div className="min-h-[100dvh] bg-background">
@@ -122,17 +124,9 @@ const Index = () => {
               <Section label="Up next"><UpNext jobs={s.jobs} ringing={s.ringing} people={s.people} /></Section>
             )}
 
-            {quiet && <Section label="How it works"><HowItWorks /></Section>}
+            <AtHomeSection s={s} />
 
             <Section label="Start"><StartActions state={s} /></Section>
-
-            {s.recent.length > 0 && (
-              <Section label="Recently handled">
-                <div className="space-y-3">{s.recent.slice(0, 3).map((row) => <ApprovalCard key={row.id} row={row} />)}</div>
-              </Section>
-            )}
-
-            <Section label="Lines"><Lines s={s} /></Section>
           </>
         )}
 
@@ -147,7 +141,17 @@ const Index = () => {
 
         {tab === "calls" && <Section label="Calls"><CallHistory /></Section>}
 
-        {tab === "activity" && <Section label="Activity"><Timeline events={s.timeline} /></Section>}
+        {tab === "activity" && (
+          <>
+            {s.recent.length > 0 && (
+              <Section label="Recently handled">
+                <div className="space-y-3">{s.recent.slice(0, 4).map((row) => <ApprovalCard key={row.id} row={row} />)}</div>
+              </Section>
+            )}
+            <Section label="Lines"><Lines s={s} /></Section>
+            <Section label="Activity"><Timeline events={s.timeline} /></Section>
+          </>
+        )}
       </main>
 
       <nav className="fixed bottom-0 inset-x-0 z-40 border-t bg-background/90 backdrop-blur pb-[env(safe-area-inset-bottom)]">

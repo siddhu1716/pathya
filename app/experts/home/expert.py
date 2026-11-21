@@ -50,8 +50,8 @@ class HomeExpert(Expert):
         self.store, self.hh, self.kitchen = store, household, kitchen
 
     # ---- entry points ----
-    def call_me(self, purpose="", run_at=None, daily_hour=None):
-        payload = {"to": self.hh["user"]["phone"], "purpose": purpose or CHECKIN}
+    def call_me(self, purpose="", run_at=None, daily_hour=None, via=None):
+        payload = {"to": self.hh["user"]["phone"], "purpose": purpose or CHECKIN, **({"via": via} if via else {})}
         if daily_hour is not None:
             payload["daily_hour"] = daily_hour
         return self.store.add_job(self.name, "home", "me", payload, run_at)

@@ -48,9 +48,10 @@ class KitchenExpert(Expert):
     def __init__(self, store, household, agent_im, ops, zepto=None):
         self.store, self.hh, self.agent_im, self.ops, self.zepto = store, household, agent_im, ops, zepto
 
-    def weekly_call(self, person, run_at=None):
+    def weekly_call(self, person, run_at=None, via=None):
         p = self.hh["people"][person]
-        return self.store.add_job(self.name, "list", person, {"person": person, "to": p["phone"]}, run_at)
+        return self.store.add_job(self.name, "list", person, {"person": person, "to": p["phone"], **({"via": via} if via else {})},
+                                  run_at)
 
     def answered(self, person, call_sid):
         """A household member phoned QuickPick: a list call that has already 'run' (never dialled)."""

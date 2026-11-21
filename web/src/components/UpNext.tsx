@@ -5,11 +5,15 @@ import { Button } from "@/components/ui/button";
 import { Panel } from "@/components/kit";
 import { api, Job, Person } from "@/lib/api";
 
-const KIND: Record<string, string> = { list: "Grocery list call", book: "Clinic booking call", checkin: "Check-in call", followup: "Follow-up" };
+const KIND: Record<string, string> = {
+  list: "Grocery list call", menu: "Menu call", book: "Clinic booking call", checkin: "Check-in call",
+  followup: "Follow-up", home: "Your check-in call", doorstep: "Incoming call",
+};
 
 const when = (ts: number) => new Date(ts * 1000).toLocaleString("en-IN", { weekday: "short", hour: "2-digit", minute: "2-digit" });
 
-const who = (job: Job, people: Person[]) => people.find((p) => p.key === job.person)?.name ?? job.person;
+const who = (job: Job, people: Person[]) =>
+  job.person === "me" ? "you" : people.find((p) => p.key === job.person)?.name ?? job.person;
 
 export function UpNext({ jobs, ringing, people }: { jobs: Job[]; ringing: Job[]; people: Person[] }) {
   const qc = useQueryClient();

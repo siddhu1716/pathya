@@ -1,6 +1,9 @@
-import { MapPin } from "lucide-react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { MapPin, PackageCheck } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { Dot, Panel, Pill } from "@/components/kit";
-import { clock, Order, span } from "@/lib/api";
+import { api, clock, Order, span } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 const STORE: Record<string, string> = { swiggy: "Instamart", zepto: "Zepto", "dry run": "Dry run" };
@@ -63,7 +66,22 @@ export function OrderTracker({ order, compact = false }: { order: Order; compact
           <Journey j={j} />
         </>
       )}
+      {!dry && at < 3 && <GotIt id={order.id} />}
     </Panel>
+  );
+}
+
+function GotIt({ id }: { id: string }) {
+  const qc = useQueryClient();
+  const got = useMutation({
+    mutationFn: () => api.delivered(id),
+    onSuccess: () => { toast.success("Delivered. Items are in At home."); qc.invalidateQueries(); },
+    onError: (e: Error) => toast.error(e.message),
+  });
+  return (
+    <Button variant="outline" className="w-full h-11" disabled={got.isPending} onClick={() => got.mutate()}>
+      <PackageCheck /> Got it
+    </Button>
   );
 }
 

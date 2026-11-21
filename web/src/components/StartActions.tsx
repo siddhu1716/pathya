@@ -1,11 +1,12 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ArrowUp, CalendarClock, FileImage, HeartPulse, Keyboard, Loader2, PhoneOutgoing } from "lucide-react";
+import { AlarmClock, ArrowUp, CalendarClock, FileImage, HeartPulse, Keyboard, Loader2, PhoneCall, PhoneOutgoing } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } from "@/components/ui/drawer";
 import { Panel, Row } from "@/components/kit";
-import { api, AppState } from "@/lib/api";
+import { api, AppState, ringIn, setRingIn } from "@/lib/api";
+import { cn } from "@/lib/utils";
 
 const day = (offset: number) => {
   const d = new Date();
@@ -49,6 +50,7 @@ type Sheet = null | "list" | "book" | "rx";
 export function StartActions({ state }: { state: AppState }) {
   const qc = useQueryClient();
   const [sheet, setSheet] = useState<Sheet>(null);
+  const [ring, setRing] = useState(ringIn());
   const done = (msg: string) => {
     toast.success(msg);
     setSheet(null);
@@ -59,6 +61,12 @@ export function StartActions({ state }: { state: AppState }) {
 
   const callList = useMutation({ mutationFn: api.callForList, onSuccess: () => done("Calling now"), onError: fail });
   const checkin = useMutation({ mutationFn: (p: string) => api.checkin(p), onSuccess: () => done("Calling now"), onError: fail });
+  const toPhone = state.phone && ring === "phone";
+  const callMe = useMutation({ mutationFn: api.callMe, onSuccess: () => done(toPhone ? "Calling your phone" : "Ringing here: tap Answer"), onError: fail });
+  const daily = useMutation({
+    mutationFn: () => api.daily(state.daily_call == null ? 20 : null),
+    onSuccess: (r) => done(r.hour == null ? "Daily check-in off" : "QuickPick will call you every day at 8 PM"), onError: fail,
+  });
 
   const [list, setList] = useState("");
   const cart = useMutation({ mutationFn: () => api.planCart(list), onSuccess: () => { setList(""); done("Cart ready below"); }, onError: fail });
@@ -80,10 +88,28 @@ export function StartActions({ state }: { state: AppState }) {
 
   return (
     <>
+      {state.phone && (
+        <div className="flex items-center justify-between px-1 pb-3">
+          <span className="text-[13px] text-muted-foreground">Calls ring on</span>
+          <div className="flex rounded-full border p-0.5">
+            {(["phone", "browser"] as const).map((v) => (
+              <button key={v} onClick={() => { setRingIn(v); setRing(v); }}
+                      className={cn("px-3 h-7 rounded-full text-[12px]", ring === v ? "bg-primary text-primary-foreground" : "text-muted-foreground")}>
+                {v === "phone" ? "Phones" : "This browser"}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       <Panel className="divide-y overflow-hidden">
+        <Row icon={PhoneCall} title="Call me now" sub={`Medicines, meals, what's running low · ${state.language}`}
+             disabled={callMe.isPending} onClick={() => callMe.mutate()} />
+        <Row icon={AlarmClock} title="Daily check-in call" sub="Every day at 8 PM" disabled={daily.isPending}
+             onClick={() => daily.mutate()}
+             right={<span className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">{state.daily_call == null ? "off" : `${state.daily_call}:00`}</span>} />
         {state.people.map((p) => (
           <Row key={p.key} icon={PhoneOutgoing} title={`Call ${p.name} for the list`}
-               sub={`Kitchen · ${p.language || "any language"}`} disabled={callList.isPending}
+               sub={`Kitchen · ${p.language}`} disabled={callList.isPending}
                onClick={() => callList.mutate(p.key)} />
         ))}
         <Row icon={Keyboard} title="Type a list" sub={state.swiggy ? "Instamart cart, Zepto for what's missing" : "Swiggy is offline"}
@@ -141,6 +167,7 @@ export function StartActions({ state }: { state: AppState }) {
                 <DrawerDescription>QuickPick copies it exactly; reminders start only after you confirm.</DrawerDescription>
               </DrawerHeader>
               <select className={field} value={rxFor} onChange={(e) => setRxFor(e.target.value)}>
+                <option value="me">{state.user} (me)</option>
                 {state.people.map((p) => <option key={p.key} value={p.key}>{p.name}</option>)}
               </select>
               <input className={field} type="file" accept="image/*" capture="environment" onChange={(e) => setPhoto(e.target.files?.[0] ?? null)} />

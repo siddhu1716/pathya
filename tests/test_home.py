@@ -111,6 +111,24 @@ def test_daily_check_in_reschedules_and_stops():
     assert home.daily_hour() is None and [j for j in store.upcoming() if j["expert"] == "home"] == []
 
 
+def test_ring_in_browser_override_and_failed_call_card(monkeypatch):
+    from app.main import make_dialer
+    app, store, _ = env()
+    home = app.state.experts["home"]
+    dialled = []
+    monkeypatch.setattr("app.core.caller.make_dial", lambda client: lambda to, jid: dialled.append(to) or "CA77")
+    dial = make_dialer(store, twilio_client=object())
+    assert dial("+919800000000", home.call_me(via="browser")) == "browser" and dialled == []
+    jid = home.call_me()
+    assert dial("+919800000000", jid) == "CA77" and dialled == ["+919800000000"]
+    store.start_job(jid)
+    store.end_job(jid, True, {"call_sid": "CA77"})
+    with TestClient(app) as client:
+        client.post("/calls/status", data={"CallSid": "CA77", "CallStatus": "failed", "CallDuration": "0"})
+    card = store.cards()[0]["card"]
+    assert "did not connect" in card["title"] and "Shiva" in card["title"]
+
+
 def test_app_key_guards_the_api(monkeypatch):
     app, store, _ = env()
     with TestClient(app) as client:

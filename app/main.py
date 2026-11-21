@@ -44,17 +44,24 @@ def twilio_ready():
 
 
 def make_dialer(store, twilio_client=None):
-    """Real phone calls with a Twilio client (CALL_MODE=twilio and valid settings); otherwise calls ring in the browser."""
-    if twilio_client is not None:
-        from app.core.caller import make_dial
-        return make_dial(twilio_client)
-    if os.getenv("CALL_MODE") == "twilio":
+    """Real phone calls with a Twilio client (CALL_MODE=twilio and valid settings); otherwise calls ring in the browser.
+    A job with payload via=browser always rings in the browser (the UI's "Ring: this browser")."""
+    if twilio_client is None and os.getenv("CALL_MODE") == "twilio":
         store.log("caller", "setup", "CALL_MODE=twilio but the Twilio settings in .env are incomplete; using browser calls")
 
     def ring_in_browser(to, job_id):
         store.log("caller", job_id, "ringing in the browser (/call/<job>)")
         return "browser"
-    return ring_in_browser
+
+    if twilio_client is None:
+        return ring_in_browser
+    from app.core.caller import make_dial
+    phone = make_dial(twilio_client)
+
+    def dial(to, job_id):
+        job = store.job(job_id)
+        return ring_in_browser(to, job_id) if job and job["payload"].get("via") == "browser" else phone(to, job_id)
+    return dial
 
 
 # ---------- request bodies ----------
@@ -205,10 +212,17 @@ def _person(request, person):
         raise HTTPException(404, f"{person} is not in household.yaml. Only people listed there are called.")
 
 
+def _via(request):
+    """?via=browser: ring this call in the app even when real phone calls are on."""
+    return "browser" if request.query_params.get("via") == "browser" else None
+
+
 @api.post("/kitchen/call/{person}")
 def kitchen_call(person: str, request: Request):
     _person(request, person)
-    return {"job": _expert(request, "kitchen").weekly_call(person)}
+    via = _via(request)
+    kitchen = _expert(request, "kitchen")
+    return {"job": kitchen.weekly_call(person, via=via) if via else kitchen.weekly_call(person)}
 
 
 class Reorder(BaseModel):
@@ -331,7 +345,7 @@ class Daily(BaseModel):
 @api.post("/home/call")
 def home_call(request: Request):
     """QuickPick phones the user now (check-in: medicines they listed, meals, reorders)."""
-    return {"job": _expert(request, "home").call_me()}
+    return {"job": _expert(request, "home").call_me(via=_via(request))}
 
 
 @api.post("/home/daily")
@@ -352,7 +366,7 @@ def health_book(body: Booking, request: Request):
     if body.clinic not in hh["clinics"]:
         raise HTTPException(404, f"{body.clinic} is not in household.yaml.")
     jid = _expert(request, "health").book(body.patient, body.clinic, body.window_start, body.window_end,
-                                          None if body.part == "any" else body.part, body.reason)
+                                          None if body.part == "any" else body.part, body.reason, via=_via(request))
     return {"job": jid}
 
 
@@ -360,7 +374,7 @@ def health_book(body: Booking, request: Request):
 def health_checkin(person: str, body: Checkin, request: Request):
     if person != "me":
         _person(request, person)
-    return {"job": _expert(request, "health").checkin(person, body.purpose)}
+    return {"job": _expert(request, "health").checkin(person, body.purpose, via=_via(request))}
 
 
 @api.post("/health/rx")
@@ -674,8 +688,18 @@ def build_app(lifespan=None) -> FastAPI:
     async def call_status(request: Request):
         form = await request.form()
         store = request.app.state.store
-        store.log("caller", form.get("CallSid", ""), f"call {form.get('CallStatus', '')} "
-                                                    f"({form.get('CallDuration', '0')} s)")
+        status, sid = form.get("CallStatus", ""), form.get("CallSid", "")
+        store.log("caller", sid, f"call {status} ({form.get('CallDuration', '0')} s)")
+        if status in ("failed", "busy", "no-answer", "canceled"):          # say so in the app, not only in the log
+            from app.experts.base import Card
+            job = next((j for j in store.recent_jobs(time.time() - 3600)
+                        if isinstance(j.get("result"), dict) and j["result"].get("call_sid") == sid), None)
+            if job:
+                who = _who(request.app.state.household, job["person"])
+                hint = ("The phone network may be refusing international calls (Jio does). Try another number, "
+                        "or answer in the browser.") if status == "failed" else "Nobody answered."
+                store.add_card(Card("caller", "info", f"Call to {who} did not connect ({status})", [hint],
+                                    question="", choices=[{"id": "ok", "label": "OK"}]).to_dict())
         return PlainTextResponse("")
 
     @app.post("/calls/incoming")
@@ -785,6 +809,27 @@ def build_app(lifespan=None) -> FastAPI:
     return app
 
 
+async def _keep_trying_swiggy(store, kitchen, delay=90):
+    """Swiggy refused at start-up (often HTTP 429): retry in the background instead of staying offline until a restart.
+    The bridges live in this task, so they are opened and closed by the same task."""
+    from app.experts.kitchen import swiggy as sw
+    while kitchen.ops is None:
+        await asyncio.sleep(delay)
+        try:
+            async with sw.bridge("im-agent", sw.AGENT_TOOLS) as agent_im, sw.bridge("im-ops") as ops:
+                kitchen.agent_im, kitchen.ops = agent_im, ops
+                store.log("app", "swiggy", "Swiggy Instamart connected (retry)")
+                try:
+                    await asyncio.Event().wait()
+                finally:
+                    kitchen.agent_im = kitchen.ops = None
+        except asyncio.CancelledError:
+            raise
+        except Exception as err:
+            store.log("app", "swiggy", f"Swiggy still not connected: {str(err)[:120]}")
+            delay = min(delay * 2, 600)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     from app.experts.health.expert import HealthExpert
@@ -812,6 +857,8 @@ async def lifespan(app: FastAPI):
                 store.log("app", "zepto", f"Zepto not connected: {err}")
         REGISTRY.clear()                                    # uvicorn --reload re-runs the lifespan
         register(KitchenExpert(store, hh, agent_im, ops, zepto))
+        if ops is None:
+            app.state.tasks.add(asyncio.create_task(_keep_trying_swiggy(store, REGISTRY["kitchen"])))
         register(HealthExpert(store, hh))
         from app.experts.doorstep.expert import DoorstepExpert
         from app.experts.home.expert import HomeExpert

@@ -108,10 +108,15 @@ def today_key(now=None):
     return datetime.fromtimestamp(now or time.time(), IST).strftime("%Y-%m-%d")
 
 
+def slot_now(now=None):
+    h = datetime.fromtimestamp(now or time.time(), IST).hour
+    return "breakfast" if h < 11 else "lunch" if h < 16 else "snack" if h < 19 else "dinner"
+
+
 async def log_meal(store, text, meal="", who="me", estimate=None, now=None):
     now = now or time.time()
     est = await (estimate or estimate_meal)(text)
-    entry = {"text": text, "meal": meal, "ts": now, **est}
+    entry = {"text": text, "meal": meal or slot_now(now), "ts": now, **est}
     store.remember(who, f"meal:{today_key(now)}:{int(now * 1000)}-{uuid.uuid4().hex[:4]}", entry, "food log")
     return entry
 

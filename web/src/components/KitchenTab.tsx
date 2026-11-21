@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { Check, Loader2, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ApprovalCard } from "@/components/ApprovalCard";
+import { AtHome, Today } from "@/components/HomeStock";
 import { Panel, Pill, Section } from "@/components/kit";
 import { api, AppState, Macros, Nutrition } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -79,7 +80,7 @@ function Plan({ state }: { state: AppState }) {
             </button>
           ))}
         </div>
-        <input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Anything to keep in mind? (Amma likes pesarattu)"
+        <input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Anything to keep in mind? (less oil, someone fasting on Monday)"
                className="w-full rounded-xl border bg-white/[0.03] px-3 py-2.5 text-[15px] outline-none focus:border-white/30" />
         <Button className="w-full h-12" disabled={make.isPending} onClick={() => make.mutate()}>
           {make.isPending ? <><Loader2 className="animate-spin" /> Planning (about 15 s)</> : plan ? <><RefreshCw /> New plan</> : "Plan meals"}
@@ -187,8 +188,10 @@ export function KitchenTab({ state }: { state: AppState }) {
     <>
       <div className="space-y-1 px-1">
         <h1 className="text-[26px] leading-tight font-medium tracking-tight">Kitchen</h1>
-        <p className="text-[15px] text-muted-foreground">What this home buys, eats and needs.</p>
+        <p className="text-[15px] text-muted-foreground">What's at home, what you ate, what to buy.</p>
       </div>
+      <Section label="At home"><AtHome state={state} /></Section>
+      <Section label="Today"><Today /></Section>
       <Section label="Your usuals"><Usuals state={state} /></Section>
       <Section label="Meal plan"><Plan state={state} /></Section>
       <Section label="Nutrition"><NutritionPanel state={state} /></Section>

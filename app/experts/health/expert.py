@@ -89,14 +89,14 @@ class HealthExpert(Expert):
         return self.hh["user"] if key == "me" else self.hh["people"][key]
 
     # ---- entry points: the Concierge's tools and the UI forms call these ----
-    def book(self, patient, clinic, window_start, window_end, part, reason, run_at=None):
+    def book(self, patient, clinic, window_start, window_end, part, reason, run_at=None, via=None):
         """The window IS the family's approval: the phone agent can only book inside it."""
         payload = {"patient": patient, "clinic": clinic, "window_start": window_start, "window_end": window_end,
-                   "part": part, "reason": reason, "to": self.hh["clinics"][clinic]["phone"]}
+                   "part": part, "reason": reason, "to": self.hh["clinics"][clinic]["phone"], **({"via": via} if via else {})}
         return self.store.add_job(self.name, "book", clinic, payload, run_at)
 
-    def checkin(self, patient, purpose, run_at=None):
-        payload = {"patient": patient, "purpose": purpose, "to": self.person(patient)["phone"]}
+    def checkin(self, patient, purpose, run_at=None, via=None):
+        payload = {"patient": patient, "purpose": purpose, "to": self.person(patient)["phone"], **({"via": via} if via else {})}
         return self.store.add_job(self.name, "checkin", patient, payload, run_at)
 
     def meds(self, patient):
