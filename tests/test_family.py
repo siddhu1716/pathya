@@ -132,6 +132,21 @@ def test_plan_prompt_has_each_eater_and_guests_and_plates_reach_the_cook():
     assert home.plate(P.member(HH, store, "nanna")) == "half rice, extra dal, tea without sugar"
 
 
+def test_store_is_safe_across_threads():
+    from concurrent.futures import ThreadPoolExecutor
+    store = Store(":memory:")
+
+    def work(n):
+        for i in range(150):
+            store.remember(f"p{n}", f"k{i % 5}", {"i": i}, "t")
+            store.facts(prefix="k")
+            store.log("t", str(n), "x")
+        return True
+    with ThreadPoolExecutor(8) as pool:                                          # FastAPI's thread pool + the loop
+        assert all(pool.map(work, range(8)))
+    assert len(store.facts(prefix="k")) == 40
+
+
 @pytest.fixture
 def client():
     from app.experts.doorstep.expert import DoorstepExpert

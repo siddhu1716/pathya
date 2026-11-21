@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { History, Home, Loader2, Package, PhoneCall, UtensilsCrossed } from "lucide-react";
+import { History, Home, Loader2, Package, Users, UtensilsCrossed } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ApprovalCard } from "@/components/ApprovalCard";
 import { CallHistory } from "@/components/CallHistory";
+import { FamilyTab, FamilyToday } from "@/components/FamilyTab";
 import { KitchenTab } from "@/components/KitchenTab";
 import { Dot, Panel, Pill, Section } from "@/components/kit";
 import { LiveCallBanner } from "@/components/LiveCall";
@@ -15,13 +16,13 @@ import { AtHome } from "@/components/HomeStock";
 import { api, AppState, connect, key, server } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
-type Tab = "home" | "kitchen" | "orders" | "calls" | "activity";
+type Tab = "home" | "family" | "meals" | "orders" | "more";
 const TABS: { id: Tab; label: string; icon: typeof Home }[] = [
   { id: "home", label: "Home", icon: Home },
-  { id: "kitchen", label: "Kitchen", icon: UtensilsCrossed },
+  { id: "family", label: "Family", icon: Users },
+  { id: "meals", label: "Meals", icon: UtensilsCrossed },
   { id: "orders", label: "Orders", icon: Package },
-  { id: "calls", label: "Calls", icon: PhoneCall },
-  { id: "activity", label: "Activity", icon: History },
+  { id: "more", label: "More", icon: History },
 ];
 
 function Lines({ s }: { s: AppState }) {
@@ -104,7 +105,7 @@ const Index = () => {
           <>
             <div className="space-y-1 px-1">
               <h1 className="text-[26px] leading-tight font-medium tracking-tight">Hi {s.user}.</h1>
-              <p className="text-[15px] text-muted-foreground">Experts prepare. You commit.</p>
+              <p className="text-[15px] text-muted-foreground">Family nutrition, from a phone call to the plate.</p>
             </div>
             <AskBox />
 
@@ -124,13 +125,19 @@ const Index = () => {
               <Section label="Up next"><UpNext jobs={s.jobs} ringing={s.ringing} people={s.people} /></Section>
             )}
 
+            <Section label="Family today" right={<button className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground" onClick={() => setTab("family")}>All</button>}>
+              <FamilyToday onOpen={() => { setTab("family"); window.scrollTo({ top: 0 }); }} />
+            </Section>
+
             <AtHomeSection s={s} />
 
             <Section label="Start"><StartActions state={s} /></Section>
           </>
         )}
 
-        {tab === "kitchen" && <KitchenTab state={s} />}
+        {tab === "family" && <FamilyTab state={s} />}
+
+        {tab === "meals" && <KitchenTab state={s} />}
 
         {tab === "orders" && (
           <Section label="Orders">
@@ -139,15 +146,14 @@ const Index = () => {
           </Section>
         )}
 
-        {tab === "calls" && <Section label="Calls"><CallHistory /></Section>}
-
-        {tab === "activity" && (
+        {tab === "more" && (
           <>
             {s.recent.length > 0 && (
               <Section label="Recently handled">
                 <div className="space-y-3">{s.recent.slice(0, 4).map((row) => <ApprovalCard key={row.id} row={row} />)}</div>
               </Section>
             )}
+            <Section label="Calls"><CallHistory /></Section>
             <Section label="Lines"><Lines s={s} /></Section>
             <Section label="Activity"><Timeline events={s.timeline} /></Section>
           </>

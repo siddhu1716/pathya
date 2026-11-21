@@ -2,6 +2,7 @@
 facts (memory shared by all Experts) and events (the journey timeline shown in the demo)."""
 import json
 import sqlite3
+import threading
 import time
 import uuid
 
@@ -22,10 +23,43 @@ def _new_id():
     return uuid.uuid4().hex[:10]
 
 
+class _Rows:
+    """A finished statement: rows fetched while the lock was held (cursors are not shared across threads)."""
+
+    def __init__(self, cur):
+        self.rowcount = cur.rowcount
+        self.rows = cur.fetchall()
+
+    def fetchone(self):
+        return self.rows[0] if self.rows else None
+
+    def fetchall(self):
+        return self.rows
+
+    def __iter__(self):
+        return iter(self.rows)
+
+
+class _LockedDB:
+    """One SQLite connection used from FastAPI's thread pool and the event loop: one statement at a time."""
+
+    def __init__(self, conn):
+        self.conn, self.lock = conn, threading.RLock()
+
+    def execute(self, query, args=()):
+        with self.lock:
+            return _Rows(self.conn.execute(query, args))
+
+    def executescript(self, script):
+        with self.lock:
+            self.conn.executescript(script)
+
+
 class Store:
     def __init__(self, path="quickpick.db"):
-        self.db = sqlite3.connect(path, check_same_thread=False, isolation_level=None)
-        self.db.row_factory = sqlite3.Row
+        conn = sqlite3.connect(path, check_same_thread=False, isolation_level=None)
+        conn.row_factory = sqlite3.Row
+        self.db = _LockedDB(conn)
         self.db.executescript(SCHEMA)
 
     # ---- events: what happened, when (the demo timeline) ----

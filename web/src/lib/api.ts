@@ -198,26 +198,55 @@ export const api = {
   line: (id: string, line: Line) => post<{ ok: boolean }>(`/api/calls/${id}/line`, line),
   kitchen: () => request<KitchenOverview>("/api/kitchen/overview"),
   reorder: (items: string[]) => post<{ card: string }>("/api/kitchen/reorder", { items }),
-  mealplan: (days: number, notes: string) => post<{ card: string; plan: MealPlan }>("/api/kitchen/mealplan", { days, notes }),
+  mealplan: (days: number, notes: string, eaters: string[] | null = null, guests = 0) =>
+    post<{ card: string; plan: MealPlan }>("/api/kitchen/mealplan", { days, notes, eaters, guests }),
   nutrition: () => post<Nutrition>("/api/kitchen/nutrition"),
   shareNutrition: () => post<{ card: string }>("/api/kitchen/nutrition/share"),
   usedUp: (k: string) => post<{ ok: boolean }>("/api/kitchen/pantry/used", { key: k }),
-  logMeal: (text: string, meal = "") => post<MealEntry>("/api/kitchen/meal", { text, meal }),
+  logMeal: (text: string, who = "me", meal = "") => post<MealEntry>("/api/kitchen/meal", { text, meal, who }),
   delivered: (id: string) => post<Order>(`/api/orders/${id}/delivered`),
   callMe: () => post<{ job: string }>(`/api/home/call${via()}`),
   daily: (hour: number | null) => post<{ ok: boolean; hour: number | null }>("/api/home/daily", { hour }),
+  family: () => request<Family>("/api/family"),
+  addMember: (name: string, relation: string) => post<Member>("/api/family", { name, relation }),
+  saveMember: (k: string, data: Partial<ProfileIn>) =>
+    request<Member>(`/api/family/${k}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) }),
+  removeMember: (k: string) => request<{ ok: boolean }>(`/api/family/${k}`, { method: "DELETE" }),
+  addMed: (k: string, med: { name: string; dose: string; times: string[]; days: number | null; food: string }) =>
+    post<Member>(`/api/family/${k}/meds`, med),
+  removeMed: (k: string, i: number) => request<Member>(`/api/family/${k}/meds/${i}`, { method: "DELETE" }),
+  reminders: (k: string, on: boolean) => post<{ ok: boolean }>(`/api/family/${k}/reminders`, { on }),
+  callMember: (k: string) => post<{ job: string }>(`/api/family/${k}/call${via()}`),
+  dailyMember: (k: string, hour: number | null) => post<{ ok: boolean }>(`/api/family/${k}/daily`, { hour }),
 };
+
+export type Targets = Macros & { sugar_g: number; salt_g: number; source: string };
+export type Dose = { slot: string; hour: number; meds: string[]; taken: "yes" | "no" | "not_sure" | null; words: string | null };
+export type Med = { name_as_written: string; dose?: string | null; strength?: string | null; food?: string | null;
+  days?: number | null; morning?: boolean; afternoon?: boolean; night?: boolean; source?: string };
+export type ProfileIn = {
+  relation: string; age: number | null; sex: string; height_cm: number | null; weight_kg: number | null; activity: string;
+  food: string; allergies: string; conditions: string[]; goal: string; override: Partial<Macros>;
+};
+export type Member = Partial<ProfileIn> & {
+  key: string; name: string; relation: string; added: boolean; has_phone: boolean; language: string; goal: string;
+  conditions: string[]; targets: Targets; today: Today; meds: Med[]; doses: Dose[]; reminders: boolean; daily_hour: number | null;
+};
+export type BoardRow = { key: string; name: string; points: number; rank: number; streak: number; breakdown: Record<string, number> };
+export type Family = { members: Member[]; board: { week_of: string; rows: BoardRow[]; rules: string[] };
+  goals: Record<string, string>; activity: string[] };
 
 export type ShelfItem = {
   key: string; name: string; qty: number; added: number; days: number; store: string;
   left: number; days_left: number; low: boolean;
 };
-export type MealEntry = Macros & { text: string; meal: string; ts: number };
-export type Today = { meals: MealEntry[]; total: Macros; targets: Macros & { source: string } };
+export type MealEntry = Macros & { text: string; meal: string; ts: number; sugar_g?: number };
+export type Today = { meals: MealEntry[]; total: Macros & { sugar_g?: number }; targets: Macros & { source: string; sugar_g?: number } };
 
 export type Usual = { name: string; count: number; typical: number; days_ago: number; store: string; price?: number };
 export type MealPlan = {
-  days: { day: string; meals: { slot: string; dish: string }[]; kcal: number; protein_g: number; carbs_g: number; fat_g: number; fibre_g: number }[];
+  days: { day: string; meals: { slot: string; dish: string }[]; kcal: number; protein_g: number; carbs_g: number; fat_g: number; fibre_g: number;
+    people?: { who: string; plate: string; kcal: number; protein_g: number; fibre_g: number; sugar_g: number }[] }[];
   ingredients: { item: string; quantity: string; have_it: boolean }[];
   notes: string;
   made?: number;

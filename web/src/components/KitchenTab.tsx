@@ -4,7 +4,8 @@ import { toast } from "sonner";
 import { Check, Loader2, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ApprovalCard } from "@/components/ApprovalCard";
-import { AtHome, Today } from "@/components/HomeStock";
+import { useFamily } from "@/components/FamilyTab";
+import { AtHome } from "@/components/HomeStock";
 import { Panel, Pill, Section } from "@/components/kit";
 import { api, AppState, Macros, Nutrition } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -56,10 +57,14 @@ function Usuals({ state }: { state: AppState }) {
 function Plan({ state }: { state: AppState }) {
   const qc = useQueryClient();
   const { data } = useQuery({ queryKey: ["kitchen"], queryFn: api.kitchen });
+  const { data: fam } = useFamily();
   const [days, setDays] = useState(3);
   const [notes, setNotes] = useState("");
+  const [off, setOff] = useState<Record<string, boolean>>({});
+  const [guests, setGuests] = useState(0);
+  const eaters = (fam?.members ?? []).filter((m) => !off[m.key]);
   const make = useMutation({
-    mutationFn: () => api.mealplan(days, notes),
+    mutationFn: () => api.mealplan(days, notes, fam ? eaters.map((m) => m.key) : null, guests),
     onSuccess: () => { toast.success("Plan ready"); qc.invalidateQueries({ queryKey: ["kitchen"] }); qc.invalidateQueries({ queryKey: ["state"] }); },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -68,9 +73,23 @@ function Plan({ state }: { state: AppState }) {
   return (
     <div className="space-y-3">
       <Panel className="p-4 space-y-3">
+        <p className="label">Who is eating</p>
+        <div className="flex flex-wrap gap-2">
+          {(fam?.members ?? []).map((m) => (
+            <button key={m.key} onClick={() => setOff({ ...off, [m.key]: !off[m.key] })}
+                    className={cn("px-3 h-9 rounded-full border text-[14px]", !off[m.key] ? "bg-primary text-primary-foreground border-primary" : "text-muted-foreground")}>
+              {m.key === "me" ? "Me" : m.name}
+            </button>
+          ))}
+          <span className="flex items-center gap-1 rounded-full border px-1 h-9">
+            <button aria-label="Fewer guests" className="w-7 h-7 text-muted-foreground" onClick={() => setGuests(Math.max(0, guests - 1))}>-</button>
+            <span className="text-[14px] tabular-nums min-w-14 text-center">{guests} guest{guests === 1 ? "" : "s"}</span>
+            <button aria-label="More guests" className="w-7 h-7 text-muted-foreground" onClick={() => setGuests(Math.min(20, guests + 1))}>+</button>
+          </span>
+        </div>
         <p className="text-[13px] text-muted-foreground">
-          {data ? `${data.prefs.people} people · ${data.prefs.diet} · ${data.prefs.cuisine}` : " "}. Uses what you already bought and
-          the doctor's written advice to choose dishes.
+          {eaters.length + guests} eating · {data ? `${data.prefs.diet} · ${data.prefs.cuisine}` : ""}. One menu, a plate for each
+          person's goal, from what's at home.
         </p>
         <div className="flex gap-2">
           {[1, 3, 7].map((d) => (
@@ -82,7 +101,7 @@ function Plan({ state }: { state: AppState }) {
         </div>
         <input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Anything to keep in mind? (less oil, someone fasting on Monday)"
                className="w-full rounded-xl border bg-white/[0.03] px-3 py-2.5 text-[15px] outline-none focus:border-white/30" />
-        <Button className="w-full h-12" disabled={make.isPending} onClick={() => make.mutate()}>
+        <Button className="w-full h-12" disabled={make.isPending || eaters.length + guests === 0} onClick={() => make.mutate()}>
           {make.isPending ? <><Loader2 className="animate-spin" /> Planning (about 15 s)</> : plan ? <><RefreshCw /> New plan</> : "Plan meals"}
         </Button>
       </Panel>
@@ -93,6 +112,9 @@ function Plan({ state }: { state: AppState }) {
             <div key={d.day} className="px-4 py-3 space-y-1">
               <div className="flex justify-between"><span className="label">{d.day}</span><span className="font-mono text-[11px] text-muted-foreground">{d.kcal} kcal · P {d.protein_g} g</span></div>
               {d.meals.map((m) => <p key={m.slot} className="text-[14px]"><span className="text-muted-foreground capitalize">{m.slot}: </span>{m.dish}</p>)}
+              {(d.people ?? []).map((p) => (
+                <p key={p.who} className="text-[13px] text-muted-foreground"><span className="text-foreground/85">{p.who}:</span> {p.plate} · {p.kcal} kcal</p>
+              ))}
             </div>
           ))}
         </Panel>
@@ -187,13 +209,12 @@ export function KitchenTab({ state }: { state: AppState }) {
   return (
     <>
       <div className="space-y-1 px-1">
-        <h1 className="text-[26px] leading-tight font-medium tracking-tight">Kitchen</h1>
-        <p className="text-[15px] text-muted-foreground">What's at home, what you ate, what to buy.</p>
+        <h1 className="text-[26px] leading-tight font-medium tracking-tight">Meals</h1>
+        <p className="text-[15px] text-muted-foreground">One kitchen, a plate for everyone.</p>
       </div>
-      <Section label="At home"><AtHome state={state} /></Section>
-      <Section label="Today"><Today /></Section>
-      <Section label="Your usuals"><Usuals state={state} /></Section>
       <Section label="Meal plan"><Plan state={state} /></Section>
+      <Section label="At home"><AtHome state={state} /></Section>
+      <Section label="Your usuals"><Usuals state={state} /></Section>
       <Section label="Nutrition"><NutritionPanel state={state} /></Section>
     </>
   );

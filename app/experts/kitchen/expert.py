@@ -131,7 +131,8 @@ class KitchenExpert(Expert):
         lines += [f"{p['who']}'s plate: {p['plate']} (about {p['kcal']} kcal, protein {p['protein_g']} g)"
                   for p in first.get("people") or []]
         eaters, guests = count
-        who = (f" for {eaters + guests} people" if eaters is not None else "") + (f" ({guests} guests)" if guests else "")
+        who = (f" for {eaters + guests} people" if eaters is not None else "") + \
+              (f" ({guests} guest{'s' if guests > 1 else ''})" if guests else "")
         avg = lambda k: round(sum(d.get(k, 0) for d in plan["days"]) / max(1, len(plan["days"])))
         choices = [{"id": "order", "label": f"Order {len(need)} missing ingredients"}] if need else []
         if cook and plan.get("days"):

@@ -1,7 +1,6 @@
-import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ArrowUp, Loader2, X } from "lucide-react";
+import { Loader2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Panel, Pill } from "@/components/kit";
 import { api, AppState, ShelfItem } from "@/lib/api";
@@ -69,57 +68,5 @@ export function AtHome({ state, compact = false }: { state: AppState; compact?: 
         </Button>
       )}
     </div>
-  );
-}
-
-/** Today's meals (said on a call or typed) and estimated energy/protein against the daily reference. */
-export function Today() {
-  const qc = useQueryClient();
-  const { data } = useKitchen();
-  const [text, setText] = useState("");
-  const log = useMutation({
-    mutationFn: () => api.logMeal(text),
-    onSuccess: (m) => { setText(""); toast.success(`About ${m.kcal} kcal`); qc.invalidateQueries({ queryKey: ["kitchen"] }); },
-    onError: (e: Error) => toast.error(e.message),
-  });
-  const t = data?.today;
-  const bars: [string, number, number, string][] = t ? [
-    ["Energy", t.total.kcal, t.targets.kcal, "kcal"],
-    ["Protein", t.total.protein_g, t.targets.protein_g, "g"],
-    ["Fibre", t.total.fibre_g, t.targets.fibre_g, "g"],
-  ] : [];
-  return (
-    <Panel className="p-4 space-y-4">
-      {bars.map(([label, v, goal, unit]) => (
-        <div key={label} className="space-y-1">
-          <div className="flex justify-between text-[13px]">
-            <span>{label}</span>
-            <span className="font-mono tabular-nums text-muted-foreground">{Math.round(v)} / {goal} {unit}</span>
-          </div>
-          <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
-            <div className="h-full rounded-full bg-foreground/80" style={{ width: `${Math.min(100, Math.round((v / goal) * 100))}%` }} />
-          </div>
-        </div>
-      ))}
-      {t && t.meals.length > 0 && (
-        <ul className="space-y-1.5 border-t pt-3">
-          {t.meals.map((m) => (
-            <li key={m.ts} className="flex justify-between gap-3 text-[14px]">
-              <span className="min-w-0 truncate"><span className="text-muted-foreground capitalize">{m.meal || "meal"}: </span>{m.text}</span>
-              <span className="font-mono text-[12px] text-muted-foreground shrink-0">{m.kcal} kcal</span>
-            </li>
-          ))}
-        </ul>
-      )}
-      <form className="flex items-center gap-2 rounded-full border pl-4 pr-1.5 py-1.5 focus-within:border-white/30"
-            onSubmit={(e) => { e.preventDefault(); if (text.trim()) log.mutate(); }}>
-        <input value={text} onChange={(e) => setText(e.target.value)} disabled={log.isPending}
-               placeholder="What did you eat? (2 idli, sambar)" className="flex-1 bg-transparent text-[15px] outline-none placeholder:text-muted-foreground min-w-0" />
-        <Button type="submit" size="icon" className="h-9 w-9 shrink-0" disabled={log.isPending || !text.trim()} aria-label="Log meal">
-          {log.isPending ? <Loader2 className="animate-spin" /> : <ArrowUp />}
-        </Button>
-      </form>
-      <p className="text-[12px] text-muted-foreground">Estimates against {t?.targets.source ?? "a general reference"}. Not dietary advice.</p>
-    </Panel>
   );
 }
