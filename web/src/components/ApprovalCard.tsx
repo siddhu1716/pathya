@@ -1,29 +1,25 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { AlertTriangle, CalendarPlus, CheckCircle2, ExternalLink, Loader2, ShieldCheck, XCircle } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+import { CalendarPlus, ExternalLink, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Dot, Panel, Pill } from "@/components/kit";
 import { api, CardRow } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
-const KIND_LABEL: Record<string, string> = {
-  order: "Kitchen · order",
-  booking: "Health · booking",
-  hold: "Health · held slot",
-  brief: "Health · doctor brief",
-  meds: "Health · prescription",
-  alert: "Urgent",
-  info: "Info",
-  followup: "Health · follow-up",
+const KIND: Record<string, string> = {
+  order: "Order", booking: "Booking", hold: "Held slot", brief: "Doctor brief", meds: "Prescription",
+  alert: "Urgent", info: "Update", followup: "Follow-up",
+};
+const SAFETY: Record<string, [string, "ok" | "warn" | "muted"]> = {
+  passed: ["Safety passed", "ok"], blocked: ["Safety held", "warn"], unchecked: ["Safety off", "muted"],
 };
 
-const SAFETY: Record<string, { label: string; className: string }> = {
-  passed: { label: "Safety: passed", className: "bg-success/15 text-success border-success/30" },
-  blocked: { label: "Safety: held", className: "bg-warning/20 text-warning-foreground border-warning/40" },
-  unchecked: { label: "Safety: off", className: "bg-muted text-muted-foreground" },
-};
+function storeOf(c: CardRow["card"]) {
+  if (c.payload?.store === "zepto") return "Zepto";
+  if (c.kind === "order") return "Instamart";
+  return c.expert[0].toUpperCase() + c.expert.slice(1);
+}
 
 export function ApprovalCard({ row }: { row: CardRow }) {
   const qc = useQueryClient();
@@ -47,106 +43,93 @@ export function ApprovalCard({ row }: { row: CardRow }) {
     onError: (e: Error) => toast.error(e.message),
   });
   const busy = tap.isPending || reject.isPending;
+  const [primary, ...rest] = c.choices;
 
   return (
-    <Card
-      className={cn(
-        "fade-in transition-smooth",
-        urgent && "border-2 border-destructive bg-destructive/5",
-        !waiting && "opacity-90",
-      )}
-    >
-      <CardHeader className="pb-2">
-        <div className="flex items-start justify-between gap-2">
-          <CardTitle className={cn("text-lg leading-snug", urgent && "text-destructive")}>
-            {urgent && <AlertTriangle className="inline w-5 h-5 mr-1 -mt-1" />}
-            {c.title}
-          </CardTitle>
-          <div className="flex flex-col items-end gap-1 shrink-0">
-            <Badge variant={urgent ? "destructive" : "secondary"}>{KIND_LABEL[c.kind] ?? c.kind}</Badge>
-            {c.kind === "brief" && c.payload?.safety && (
-              <Badge variant="outline" className={SAFETY[c.payload.safety]?.className}>
-                <ShieldCheck className="w-3 h-3 mr-1" />
-                {SAFETY[c.payload.safety]?.label ?? c.payload.safety}
-              </Badge>
-            )}
-          </div>
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-3 text-sm">
-        {c.lines.length > 0 && (
-          <ul className="space-y-1">
-            {c.lines.filter(Boolean).map((l, i) => (
-              <li key={i} className="whitespace-pre-line">{l}</li>
-            ))}
+    <Panel className={cn("p-4 space-y-4 fade-in", urgent && "border-destructive/60")}>
+      <div className="flex items-center justify-between gap-2">
+        <span className="label flex items-center gap-2">
+          <Dot tone={urgent ? "bad" : waiting ? "warn" : row.status === "failed" ? "bad" : "ok"} pulse={urgent} />
+          {KIND[c.kind] ?? c.kind} · {storeOf(c)}
+        </span>
+        {c.kind === "brief" && c.payload?.safety && SAFETY[c.payload.safety] && (
+          <Pill tone={SAFETY[c.payload.safety][1]}>{SAFETY[c.payload.safety][0]}</Pill>
+        )}
+      </div>
+
+      <div className="space-y-2">
+        <h3 className="text-lg font-medium leading-snug">{c.title}</h3>
+        {c.lines.filter(Boolean).length > 0 && (
+          <ul className="space-y-1 text-[14px] text-foreground/85">
+            {c.lines.filter(Boolean).map((l, i) => <li key={i} className="whitespace-pre-line">{l}</li>)}
           </ul>
         )}
+      </div>
 
-        {c.total && (
-          <p className="text-base font-semibold">To pay: {c.total}</p>
-        )}
-        {c.address && (
-          <p className="text-muted-foreground">Your order will be delivered to: {c.address}</p>
-        )}
+      {(c.total || c.address) && (
+        <div className="rounded-xl bg-white/[0.03] border px-3 py-2.5 space-y-1.5">
+          {c.total && (
+            <div className="flex items-baseline justify-between">
+              <span className="label">To pay</span>
+              <span className="text-xl font-medium tabular-nums">{c.total}</span>
+            </div>
+          )}
+          {c.address && <p className="text-[13px] text-muted-foreground">Your order will be delivered to: {c.address}</p>}
+        </div>
+      )}
 
-        {c.warnings.length > 0 && (
-          <div className="space-y-1">
-            {c.warnings.map((w, i) => (
-              <p key={i} className="rounded-md border border-warning/40 bg-warning/15 px-3 py-2 whitespace-pre-line">
-                {w}
-              </p>
-            ))}
-          </div>
-        )}
+      {c.warnings.length > 0 && (
+        <ul className="space-y-1.5">
+          {c.warnings.map((w, i) => (
+            <li key={i} className="text-[13px] text-warning/90 border-l-2 border-warning/50 pl-3 whitespace-pre-line">{w}</li>
+          ))}
+        </ul>
+      )}
 
-        {waiting && (
-          <>
-            {c.question && <p className="font-medium">{c.question}</p>}
-            <div className="flex flex-wrap gap-2">
-              {c.choices.map((ch) => (
-                <Button
-                  key={ch.id}
-                  size="sm"
-                  variant={urgent ? "destructive" : ch.id === c.choices[0]?.id ? "default" : "outline"}
-                  disabled={busy}
-                  onClick={() => {
-                    setPicked(ch.id);
-                    tap.mutate(ch.id);
-                  }}
-                >
-                  {tap.isPending && picked === ch.id && <Loader2 className="w-4 h-4 mr-1 animate-spin" />}
+      {waiting ? (
+        <div className="space-y-3">
+          {c.question && <p className="text-[15px]">{c.question}</p>}
+          {primary && (
+            <Button className="w-full h-12 text-[15px]" variant={urgent ? "destructive" : "default"} disabled={busy}
+                    onClick={() => { setPicked(primary.id); tap.mutate(primary.id); }}>
+              {tap.isPending && picked === primary.id && <Loader2 className="animate-spin" />}
+              {primary.label}
+            </Button>
+          )}
+          {rest.length > 0 && (
+            <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
+              {rest.map((ch) => (
+                <Button key={ch.id} variant="outline" size="sm" className="shrink-0" disabled={busy}
+                        onClick={() => { setPicked(ch.id); tap.mutate(ch.id); }}>
+                  {tap.isPending && picked === ch.id && <Loader2 className="animate-spin" />}
                   {ch.label}
                 </Button>
               ))}
-              {!urgent && (
-                <Button size="sm" variant="ghost" disabled={busy} onClick={() => reject.mutate()}>
-                  Not now
-                </Button>
-              )}
             </div>
-            {c.choices.length === 0 && (
-              <p className="text-muted-foreground">Nothing to approve on this card.</p>
-            )}
-          </>
-        )}
-
-        {!waiting && <Outcome row={row} />}
-      </CardContent>
-    </Card>
+          )}
+          {!urgent && (
+            <button className="w-full text-center text-[13px] text-muted-foreground py-1" disabled={busy} onClick={() => reject.mutate()}>
+              Not now
+            </button>
+          )}
+          {c.choices.length === 0 && <p className="text-[13px] text-muted-foreground">Nothing to approve on this card.</p>}
+        </div>
+      ) : (
+        <Outcome row={row} />
+      )}
+    </Panel>
   );
 }
 
 function Outcome({ row }: { row: CardRow }) {
   const r = row.result;
-  if (row.status === "rejected") return <p className="text-muted-foreground">Not now. Nothing was done.</p>;
+  if (row.status === "rejected") return <p className="text-[13px] text-muted-foreground">Skipped. Nothing was done.</p>;
   if (row.status === "running") {
     return (
-      <div className="space-y-2">
-        <p className="flex items-center gap-2 font-medium">
-          <Loader2 className="w-4 h-4 animate-spin" /> {r?.pay_url ? "Waiting for your UPI payment…" : "Working…"}
-        </p>
+      <div className="space-y-2 text-[14px]">
+        <p className="flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> {r?.pay_url ? "Waiting for your UPI payment" : "Working"}</p>
         {r?.pay_url && (
-          <a className="inline-flex items-center gap-1 text-primary underline" href={r.pay_url} target="_blank" rel="noreferrer">
+          <a className="inline-flex items-center gap-1 underline underline-offset-4" href={r.pay_url} target="_blank" rel="noreferrer">
             Open the payment page <ExternalLink className="w-3 h-3" />
           </a>
         )}
@@ -155,24 +138,20 @@ function Outcome({ row }: { row: CardRow }) {
   }
   const failed = row.status === "failed" || r?.ok === false;
   return (
-    <div className={cn("space-y-2 rounded-md border px-3 py-2", failed ? "border-destructive/40 bg-destructive/5" : "border-success/30 bg-success/5")}>
-      <p className="flex items-center gap-2 font-medium">
-        {failed ? <XCircle className="w-4 h-4 text-destructive" /> : <CheckCircle2 className="w-4 h-4 text-success" />}
-        {failed ? "Not done" : `Done${row.choice ? ` (${row.choice})` : ""}`}
+    <div className="space-y-2 text-[14px] border-t pt-3">
+      <p className="label flex items-center gap-2">
+        <Dot tone={failed ? "bad" : "ok"} /> {failed ? "Not done" : `Done${row.choice ? ` · ${row.choice.replace("UPI:", "UPI ")}` : ""}`}
       </p>
       {r?.message && <p className="whitespace-pre-line">{r.message}</p>}
       {r?.error && <p className="whitespace-pre-line text-destructive">{r.error}</p>}
-      {r?.eta &&
-        Object.entries(r.eta).map(([id, eta]) => (
-          <p key={id}>Order {id}: arriving in {eta}</p>
-        ))}
-      {r?.jobs && r.jobs.length > 0 && <p>{r.jobs.length} call(s) scheduled. See Upcoming.</p>}
+      {r?.eta && Object.entries(r.eta).map(([id, eta]) => <p key={id} className="text-muted-foreground">Arriving in {eta}</p>)}
+      {r?.jobs && r.jobs.length > 0 && <p className="text-muted-foreground">{r.jobs.length} call(s) scheduled.</p>}
       {row.card.payload?.ics && (
-        <a className="inline-flex items-center gap-1 text-primary underline" href={api.icsUrl(row.id)}>
+        <a className="inline-flex items-center gap-1.5 underline underline-offset-4" href={api.icsUrl(row.id)}>
           <CalendarPlus className="w-4 h-4" /> Add to calendar
         </a>
       )}
-      {r?.cancel && <p className="text-muted-foreground">{r.cancel}</p>}
+      {r?.cancel && <p className="text-[12px] text-muted-foreground">{r.cancel}</p>}
     </div>
   );
 }

@@ -1,101 +1,88 @@
-import { Bike, CheckCircle2, Clock, MapPin, Package, PhoneCall, ShoppingBag, Timer } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent } from "@/components/ui/card";
+import { MapPin } from "lucide-react";
+import { Dot, Panel, Pill } from "@/components/kit";
 import { clock, Order, span } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
-const STORE: Record<string, { label: string; className: string }> = {
-  swiggy: { label: "Swiggy Instamart", className: "bg-orange-500 text-white" },
-  zepto: { label: "Zepto", className: "bg-purple-600 text-white" },
-  "dry run": { label: "Dry run", className: "bg-muted text-muted-foreground" },
-};
+const STORE: Record<string, string> = { swiggy: "Instamart", zepto: "Zepto", "dry run": "Dry run" };
 
 function stage(o: Order) {
   if (o.delivered) return 3;
   const s = (o.status ?? "").toLowerCase();
   if (/(out for|on the way|picked|rider|partner|arriv|transit|dispatch)/.test(s)) return 2;
   if (/(pack|prepar|confirm|accept)/.test(s)) return 1;
-  return o.store === "dry run" ? -1 : 0;
+  return 0;
 }
 
-const STEPS = [
-  { label: "Placed", icon: ShoppingBag },
-  { label: "Packing", icon: Package },
-  { label: "On the way", icon: Bike },
-  { label: "Delivered", icon: CheckCircle2 },
-];
+const STEPS = ["Placed", "Packing", "On the way", "Delivered"];
 
 export function OrderTracker({ order, compact = false }: { order: Order; compact?: boolean }) {
-  const st = STORE[order.store] ?? { label: order.store, className: "bg-secondary" };
+  const dry = order.store === "dry run";
   const at = stage(order);
   const j = order.journey ?? { placed: order.placed };
   return (
-    <Card className={cn("overflow-hidden fade-in", at === 3 && "border-success/40")}>
-      <CardContent className="p-4 space-y-4">
-        <div className="flex items-start justify-between gap-2">
-          <div>
-            <Badge className={st.className}>{st.label}</Badge>
-            <p className="mt-2 text-lg font-semibold leading-tight">
-              {at === 3 ? "Delivered" : order.store === "dry run" ? "Not placed (dry run)" : order.status || "Placed"}
-            </p>
-            {order.eta && at < 3 && order.store !== "dry run" && (
-              <p className="text-sm text-muted-foreground flex items-center gap-1"><Timer className="w-4 h-4" /> Arriving in {order.eta}</p>
-            )}
-          </div>
-          <div className="text-right">
-            {order.total && <p className="text-lg font-bold">{order.total}</p>}
-            <p className="text-xs text-muted-foreground">{clock(order.placed)}</p>
-          </div>
+    <Panel className="p-4 space-y-4 fade-in">
+      <div className="flex items-start justify-between gap-3">
+        <div className="space-y-1">
+          <span className="label flex items-center gap-2">
+            <Dot tone={dry ? "muted" : at === 3 ? "ok" : "warn"} pulse={!dry && at < 3} /> {STORE[order.store] ?? order.store}
+          </span>
+          <p className="text-lg font-medium leading-tight">
+            {dry ? "Not placed (dry run)" : at === 3 ? "Delivered" : order.status || "Placed"}
+          </p>
+          {order.eta && !dry && at < 3 && <p className="text-[13px] text-muted-foreground">Arriving in {order.eta}</p>}
         </div>
+        <div className="text-right shrink-0">
+          {order.total && <p className="text-lg font-medium tabular-nums">{order.total}</p>}
+          <p className="font-mono text-[11px] text-muted-foreground">{clock(order.placed)}</p>
+        </div>
+      </div>
 
-        {order.store !== "dry run" && (
-          <div className="grid grid-cols-4 gap-1">
+      {!dry && (
+        <div>
+          <div className="flex gap-1">
             {STEPS.map((s, i) => (
-              <div key={s.label} className="flex flex-col items-center text-center gap-1">
-                <div className={cn("w-9 h-9 rounded-full flex items-center justify-center transition-smooth",
-                  i <= at ? "bg-success text-white" : "bg-muted text-muted-foreground",
-                  i === at && at < 3 && "voice-pulse")}>
-                  <s.icon className="w-4 h-4" />
-                </div>
-                <span className={cn("text-[11px]", i <= at ? "font-medium" : "text-muted-foreground")}>{s.label}</span>
-              </div>
+              <div key={s} className={cn("h-1 flex-1 rounded-full", i <= at ? "bg-success" : "bg-white/10")} />
             ))}
           </div>
-        )}
+          <div className="flex justify-between mt-2">
+            {STEPS.map((s, i) => (
+              <span key={s} className={cn("font-mono text-[10px] uppercase tracking-wider", i <= at ? "text-foreground" : "text-muted-foreground")}>{s}</span>
+            ))}
+          </div>
+        </div>
+      )}
 
-        {!compact && (
-          <>
-            <ul className="text-sm space-y-0.5">
-              {order.items.map((it, i) => <li key={i}>• {it}</li>)}
-            </ul>
-            {order.address && (
-              <p className="text-sm text-muted-foreground flex gap-1"><MapPin className="w-4 h-4 shrink-0 mt-0.5" /> {order.address}</p>
-            )}
-            <Journey j={j} />
-          </>
-        )}
-      </CardContent>
-    </Card>
+      {!compact && (
+        <>
+          <ul className="text-[14px] text-foreground/85 space-y-1 border-t pt-3">
+            {order.items.map((it, i) => <li key={i}>{it}</li>)}
+          </ul>
+          {order.address && (
+            <p className="text-[13px] text-muted-foreground flex gap-1.5"><MapPin className="w-3.5 h-3.5 shrink-0 mt-0.5" /> {order.address}</p>
+          )}
+          <Journey j={j} />
+        </>
+      )}
+    </Panel>
   );
 }
 
 function Journey({ j }: { j: Order["journey"] }) {
   const steps = [
-    { label: "Call", at: j.call_started, icon: PhoneCall },
-    { label: "Cart ready", at: j.card_ready, icon: ShoppingBag },
-    { label: "Tapped", at: j.tapped, icon: CheckCircle2 },
-    { label: "Delivered", at: j.delivered ?? undefined, icon: Bike },
+    { label: "Call", at: j.call_started },
+    { label: "Cart", at: j.card_ready },
+    { label: "Tap", at: j.tapped },
+    { label: "Delivered", at: j.delivered ?? undefined },
   ].filter((s) => s.at);
   if (steps.length < 2) return null;
   return (
-    <div className="rounded-lg bg-muted/50 px-3 py-2">
-      <p className="text-xs font-medium text-muted-foreground mb-1 flex items-center gap-1"><Clock className="w-3 h-3" /> Journey</p>
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+    <div className="border-t pt-3 space-y-2">
+      <p className="label">Journey</p>
+      <div className="flex flex-wrap gap-2">
         {steps.map((s, i) => (
-          <span key={s.label} className="flex items-center gap-1">
-            {i > 0 && <span className="text-muted-foreground">→ {span(steps[i - 1].at, s.at)} →</span>}
-            <s.icon className="w-3 h-3" /> {s.label} <span className="text-muted-foreground">{clock(s.at!)}</span>
-          </span>
+          <Pill key={s.label}>
+            {s.label} {clock(s.at!).slice(0, 5)}{i > 0 && ` · +${span(steps[i - 1].at, s.at)}`}
+          </Pill>
         ))}
       </div>
     </div>

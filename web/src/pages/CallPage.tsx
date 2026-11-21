@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
-import { Bot, CheckCircle2, Loader2, Phone, PhoneOff, Wrench } from "lucide-react";
+import { Loader2, Phone, PhoneOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Dot } from "@/components/kit";
+import { Bubbles } from "@/components/LiveCall";
 import { api } from "@/lib/api";
-import { cn } from "@/lib/utils";
 
 type Line = { role: "ai" | "them" | "tool"; text: string };
 type Info = { id: string; kind: string; expert: string; who: string; user: string; done: boolean };
@@ -145,51 +146,41 @@ export default function CallPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-slate-900 to-slate-800 text-white flex flex-col items-center px-4 py-8">
-      <div className="text-center space-y-1 mt-6">
-        <div className={cn("mx-auto w-20 h-20 rounded-full bg-gradient-hero flex items-center justify-center", phase === "ringing" && "voice-pulse")}>
-          <Bot className="w-10 h-10" />
-        </div>
-        <p className="text-2xl font-semibold mt-4">QuickPick (AI)</p>
-        <p className="text-slate-300">{info ? `${info.expert} · calling ${info.who} for ${info.user}` : "…"}</p>
-        <p className="text-slate-400 text-sm">
+    <div className="min-h-[100dvh] bg-background flex flex-col px-4 pt-10 pb-[max(2rem,env(safe-area-inset-bottom))] max-w-xl mx-auto">
+      <div className="text-center space-y-3">
+        <span className="label flex items-center justify-center gap-2">
+          <Dot tone={phase === "live" ? "ok" : phase === "error" ? "bad" : "muted"} pulse={phase === "live" || phase === "ringing"} />
           {phase === "ringing" && "Incoming call"}
-          {phase === "connecting" && "Connecting…"}
-          {phase === "live" && mmss(seconds)}
+          {phase === "connecting" && "Connecting"}
+          {phase === "live" && `Live · ${mmss(seconds)}`}
           {phase === "ended" && "Call ended"}
-        </p>
+          {phase === "error" && "Could not connect"}
+        </span>
+        <p className="text-[28px] font-medium tracking-tight">QuickPick</p>
+        <p className="text-[14px] text-muted-foreground">{info ? `${info.expert} · talking with ${info.who} for ${info.user}` : " "}</p>
       </div>
 
-      <div className="flex-1 w-full max-w-md my-6 space-y-2 overflow-y-auto">
-        {lines.map((l, i) => (
-          <div key={i} className={cn("rounded-2xl px-4 py-2 text-sm max-w-[85%]",
-            l.role === "ai" && "bg-primary/80",
-            l.role === "them" && "bg-slate-600 ml-auto",
-            l.role === "tool" && "bg-transparent border border-amber-400/50 text-amber-200 text-xs mx-auto max-w-full")}>
-            {l.role === "tool" && <Wrench className="inline w-3 h-3 mr-1" />}
-            {l.text}
-          </div>
-        ))}
+      <div className="flex-1 w-full my-8 overflow-y-auto">
+        <Bubbles lines={lines} />
         {phase === "ended" && (
-          <p className="text-center text-emerald-300 flex items-center justify-center gap-2 pt-4">
-            <CheckCircle2 className="w-5 h-5" /> Done. The card appears on the QuickPick home screen.
-          </p>
+          <p className="text-center text-[14px] text-muted-foreground pt-6">Done. The result appears on the QuickPick home screen.</p>
         )}
-        {phase === "error" && <p className="text-center text-red-300">{error}</p>}
+        {phase === "error" && <p className="text-center text-[14px] text-destructive">{error}</p>}
       </div>
 
-      <div className="pb-6">
+      <div className="flex justify-center">
         {phase === "ringing" && info && (
-          <Button size="voice" className="bg-emerald-500 hover:bg-emerald-600" onClick={answer} aria-label="Answer">
-            <Phone className="w-8 h-8" />
+          <Button className="h-16 w-16 rounded-full bg-success text-black hover:bg-success/90" onClick={answer} aria-label="Answer">
+            <Phone className="!size-6" />
           </Button>
         )}
-        {phase === "connecting" && <Loader2 className="w-10 h-10 animate-spin" />}
+        {phase === "connecting" && <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />}
         {phase === "live" && (
-          <Button size="voice" variant="destructive" onClick={hangUp} aria-label="Hang up">
-            <PhoneOff className="w-8 h-8" />
+          <Button className="h-16 w-16 rounded-full" variant="destructive" onClick={hangUp} aria-label="Hang up">
+            <PhoneOff className="!size-6" />
           </Button>
         )}
+        {phase === "ended" && <Button variant="outline" asChild><a href="/">Back to QuickPick</a></Button>}
       </div>
     </div>
   );

@@ -112,6 +112,7 @@ export type AppState = {
   zepto: boolean;
   phone: boolean;
   phone_number: string | null;
+  exotel: boolean;
   user: string;
   people: Person[];
   clinics: Clinic[];
