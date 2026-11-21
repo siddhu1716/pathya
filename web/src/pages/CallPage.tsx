@@ -127,10 +127,13 @@ export default function CallPage() {
         const g = await apiFetch(`/api/calls/${id}/greeting`).then((r) => r.json());
         limit.current = (g.max_minutes ?? 5) * 60;
         setPhase("live");
+        // A system message, not response.create instructions: those would replace the session prompt for this turn.
         send({
-          type: "response.create",
-          response: { instructions: `The person just answered. Your first sentence must be exactly: "${g.greeting}" Then continue as instructed.` },
+          type: "conversation.item.create",
+          item: { type: "message", role: "system", content: [{ type: "input_text",
+            text: `The person just answered. Your first sentence must be exactly: "${g.greeting}" Then, in the same turn, continue as your instructions say (say why you are calling, or ask how you can help).` }] },
         });
+        send({ type: "response.create" });
       };
       const offer = await conn.createOffer();
       await conn.setLocalDescription(offer);

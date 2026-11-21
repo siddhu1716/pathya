@@ -9,7 +9,7 @@ import json
 import os
 from contextlib import asynccontextmanager
 
-from app.core.browser_call import greeting_event, session_config
+from app.core.browser_call import greeting_events, session_config
 from app.core.carriers import Twilio
 
 GOODBYE_MARK = "goodbye"
@@ -66,7 +66,8 @@ async def phone_bridge(ws, call_for_start, finish, hang_up, log, connect=connect
         async with connect() as oa:
             await oa.send(json.dumps({"type": "session.update",
                                       "session": session_config(call.plan, audio_format="audio/pcmu")}))
-            await oa.send(json.dumps(greeting_event(call.plan)))
+            for event in greeting_events(call.plan):
+                await oa.send(json.dumps(event))
 
             async def from_carrier():
                 while True:

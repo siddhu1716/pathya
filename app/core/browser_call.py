@@ -40,11 +40,17 @@ def session_config(plan, model=None, voice=None, audio_format=None):
     }
 
 
-def greeting_event(plan):
-    """First response once the person answers: the greeting that says it is an AI."""
-    return {"type": "response.create", "response": {
-        "instructions": f'The person just answered. Your first sentence must be exactly: "{plan.greeting}" '
-                        "Then continue as instructed."}}
+def greeting_events(plan):
+    """First turn once the person answers: the greeting that says it is an AI. Sent as a system message plus a plain
+    response.create, because instructions on response.create would replace the session prompt for that turn."""
+    return [
+        {"type": "conversation.item.create", "item": {"type": "message", "role": "system", "content": [{
+            "type": "input_text",
+            "text": f'The person just answered. Your first sentence must be exactly: "{plan.greeting}" '
+                    "Then, in the same turn, continue as your instructions say (say why you are calling, or ask how "
+                    "you can help)."}]}},
+        {"type": "response.create"},
+    ]
 
 
 async def answer_sdp(offer_sdp, config, api_key=None, client=None):

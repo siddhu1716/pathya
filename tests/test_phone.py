@@ -105,11 +105,14 @@ def test_phone_bridge_runs_plan_and_hangs_up_after_goodbye():
     update = rt.sent[0]["session"]
     assert rt.sent[0]["type"] == "session.update" and update["audio"]["input"]["format"]["type"] == "audio/pcmu"
     assert {t["name"] for t in update["tools"]} >= {"book_slot", "end_call"}
-    assert "QuickPick" in rt.sent[1]["response"]["instructions"] and "AI" in rt.sent[1]["response"]["instructions"]               # greeting says it is an AI
+    first = rt.sent[1]["item"]["content"][0]["text"]
+    assert rt.sent[1]["item"]["role"] == "system" and "QuickPick" in first and "AI" in first   # greeting says it is an AI
+    assert rt.sent[2] == {"type": "response.create"}                                        # session prompt kept
     assert {"type": "input_audio_buffer.append", "audio": "AAAA"} in rt.sent                # caller audio -> model
     assert {"event": "media", "streamSid": "MZ1", "media": {"payload": "QUJD"}} in tw.sent  # model audio -> caller
     assert {"event": "clear", "streamSid": "MZ1"} in tw.sent                                # barge-in clears playback
-    outputs = [e["item"]["output"] for e in rt.sent if e["type"] == "conversation.item.create"]
+    outputs = [e["item"]["output"] for e in rt.sent
+               if e["type"] == "conversation.item.create" and e["item"]["type"] == "function_call_output"]
     assert outputs[0].startswith("Refused") and outputs[1].startswith("Booked")             # window enforced in code
     assert any("Refused" in l for l in logs)
     assert {"event": "mark", "streamSid": "MZ1", "mark": {"name": GOODBYE_MARK}} in tw.sent
