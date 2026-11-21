@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { ApprovalCard } from "@/components/ApprovalCard";
 import { useFamily } from "@/components/FamilyTab";
 import { AtHome } from "@/components/HomeStock";
-import { Panel, Pill, Section } from "@/components/kit";
+import { Meter, Panel, Pill, Section } from "@/components/kit";
 import { api, AppState, Macros, MealPlan, Nutrition } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -218,21 +218,7 @@ const ROWS: [keyof Macros, string, string][] = [
 function Bars({ n }: { n: Nutrition }) {
   return (
     <div className="space-y-3">
-      {ROWS.map(([k, label, unit]) => {
-        const v = n.per_person_day[k], t = n.targets[k];
-        const pct = t ? Math.min(100, Math.round((v / t) * 100)) : 0;
-        return (
-          <div key={k} className="space-y-1">
-            <div className="flex justify-between text-[13px]">
-              <span>{label}</span>
-              <span className="font-mono tabular-nums text-muted-foreground">{Math.round(v)} / {t} {unit}</span>
-            </div>
-            <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
-              <div className={cn("h-full rounded-full", pct >= 80 ? "bg-success" : "bg-warning")} style={{ width: `${pct}%` }} />
-            </div>
-          </div>
-        );
-      })}
+      {ROWS.map(([k, label, unit]) => <Meter key={k} label={label} v={n.per_person_day[k]} goal={n.targets[k]} unit={unit} />)}
     </div>
   );
 }
@@ -303,8 +289,8 @@ export function KitchenTab({ state }: { state: AppState }) {
       </div>
       <Section label="Meal plan"><Plan state={state} /></Section>
       <Section label="At home"><AtHome state={state} /></Section>
-      <Section label="Your usuals"><Usuals state={state} /></Section>
-      <Section label="Nutrition"><NutritionPanel state={state} /></Section>
+      <Section label="Buy again"><Usuals state={state} /></Section>
+      <Section label="Household nutrition"><NutritionPanel state={state} /></Section>
     </>
   );
 }

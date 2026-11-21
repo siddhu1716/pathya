@@ -7,7 +7,7 @@ import { api, Job, Person } from "@/lib/api";
 
 const KIND: Record<string, string> = {
   list: "Grocery list call", menu: "Menu call", book: "Clinic booking call", checkin: "Check-in call",
-  followup: "Follow-up", home: "Your check-in call", doorstep: "Incoming call",
+  followup: "Follow-up", home: "Check-in call", doorstep: "Incoming call", meds: "Medicine reminder", intake: "Doctor booking call",
 };
 
 const when = (ts: number) => new Date(ts * 1000).toLocaleString("en-IN", { weekday: "short", hour: "2-digit", minute: "2-digit" });
@@ -40,7 +40,7 @@ export function UpNext({ jobs, ringing, people }: { jobs: Job[]; ringing: Job[];
           <span className="w-9 h-9 rounded-full border flex items-center justify-center"><Clock className="w-4 h-4" /></span>
           <div className="flex-1 min-w-0">
             <p className="text-[15px]">{KIND[j.kind] ?? j.kind} · {who(j, people)}</p>
-            <p className="text-[13px] text-muted-foreground truncate">{when(j.run_at)}{j.payload?.purpose ? ` · ${j.payload.purpose}` : ""}</p>
+            <p className="text-[13px] text-muted-foreground truncate">{when(j.run_at)}{j.kind === "home" ? (j.payload?.daily_hour != null ? " · every evening" : "") : j.kind === "meds" ? ` · ${j.payload?.slot}` : j.payload?.purpose ? ` · ${j.payload.purpose}` : ""}</p>
           </div>
           <Button size="sm" variant="outline" disabled={runNow.isPending} onClick={() => runNow.mutate(j.id)}>Run now</Button>
         </div>

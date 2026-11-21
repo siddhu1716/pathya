@@ -42,7 +42,8 @@ INTAKE_CALL = """You are Pathya, an AI assistant, calling {name} for {user}'s fa
 Your first sentence: "{greeting}" {speak} Use short sentences, one question at a time.
 Find out: who it is for ({members}); the reason for the visit, in their words; the hospital or doctor they prefer, if
 any (already saved: {clinics}), or the area; which days and what part of the day suit them (today is {today}); anything
-the clinic should know. Then call save_request with dates as YYYY-MM-DD, and read it back once.
+the clinic should know. Then call save_request with dates as YYYY-MM-DD (leave hospital, doctor or area empty when
+none was named; notes only for extra things the clinic should know, else empty), and read it back once.
 Never diagnose, never say whether a symptom is serious, never suggest a medicine or a test. If it sounds like an
 emergency (chest pain, breathlessness, fainting, sudden weakness on one side, heavy bleeding), tell them to call 108 now
 and end the call (why=emergency).
@@ -165,6 +166,9 @@ class HealthExpert(Expert):
     def request_card(self, req):
         """A booking request (from the intake call or the app form) -> a card: phone a saved clinic, or find one first."""
         from app.experts.family import profiles as P
+        vague = ("assign", "any", "none", "not ", "unknown", "n/a")
+        req = {**req, **{k: "" for k in ("hospital", "doctor", "area")
+                         if any(v in str(req.get(k) or "").lower() for v in vague)}}
         names = {m["name"].lower(): m["key"] for m in P.members(self.hh, self.store)}
         patient = names.get(str(req.get("patient", "")).strip().lower(), req.get("patient_key") or "me")
         start = _date(req.get("from")) or datetime.now(IST).date() + timedelta(days=1)

@@ -40,7 +40,8 @@ Python 3.11+, FastAPI, Jinja2 + HTMX (Pico.css), SQLite (app/core/store.py), ope
 - Conditions are stored as the family says the doctor told them; they only choose dishes, portions and swaps. Nothing is diagnosed.
 - Targets are a general reference (formula or ICMR-NIN), labelled as such; a nutritionist's numbers override them.
 - Medicines are kept exactly as written; reminder calls only remind and record the answer in the person's words.
-- The leaderboard scores habits only (meals logged, near own targets, doses taken, calls answered), never readings or weight.
+- The health score uses habits only (meals logged and near own targets, doses taken, steps, check-ins answered), never readings or weight; it is labelled "not a medical test".
+- Booking a clinic that is not in household.yaml: a web lookup proposes the number with its source; it is written into household.yaml and phoned only after a human taps "Add and phone them".
 - Members added in the app have no phone and are never called.
 - Age checkups list what public programmes offer at that age (NP-NCD, WHO ICOPE, USPSTF), with the source, as "ask the doctor"; never "you have" or "you will get".
 - The plate guard and calls only quote a member's own notes (goal, allergy, what the doctor said); the human who taps decides. No health claims of our own.

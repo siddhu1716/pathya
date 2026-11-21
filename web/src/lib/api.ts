@@ -228,6 +228,9 @@ export const api = {
   portion: (day: number, meal: number, part: number, who: string, qty: number) =>
     post<MealPlan>("/api/kitchen/mealplan/portion", { day, meal, part, who, qty }),
   fit: (day: number, who: string) => post<MealPlan>("/api/kitchen/mealplan/fit", { day, who }),
+  intake: (who: string) => post<{ job: string }>(`/api/health/intake/${who}${via()}`),
+  bookRequest: (b: { patient: string; hospital: string; doctor: string; area: string; reason: string; from_date: string; to_date: string; part: string }) =>
+    post<{ card: string }>("/api/health/request", b),
 };
 
 export type BodyReport = { date?: string | null; weight_kg?: number | null; height_cm?: number | null; body_fat_pct?: number | null;
@@ -248,16 +251,18 @@ export type Med = { name_as_written: string; dose?: string | null; strength?: st
 export type ProfileIn = {
   relation: string; age: number | null; sex: string; height_cm: number | null; weight_kg: number | null; activity: string;
   food: string; allergies: string; conditions: string[]; goal: string; override: Partial<Macros>; body: BodyReport;
+  target_weight_kg: number | null;
 };
 export type Member = Partial<ProfileIn> & {
   key: string; name: string; relation: string; added: boolean; has_phone: boolean; language: string; goal: string;
   conditions: string[]; targets: Targets; today: Today; meds: Med[]; doses: Dose[]; reminders: boolean; daily_hour: number | null;
-  elder: boolean; body: BodyReport; checkups: Checkup[]; watch: string[];
+  elder: boolean; body: BodyReport; checkups: Checkup[]; watch: string[]; health: Health; goal_progress: GoalProgress | null;
   activity: { steps: number; active_kcal: number; source: string } | null;
 };
-export type BoardRow = { key: string; name: string; points: number; rank: number; streak: number; breakdown: Record<string, number> };
-export type Family = { members: Member[]; board: { week_of: string; rows: BoardRow[]; rules: string[] };
-  goals: Record<string, string>; activity: string[] };
+export type HealthPart = { part: "food" | "medicines" | "movement" | "checkins"; weight: number; percent: number; detail: string; tips: string[] };
+export type Health = { key: string; name: string; score: number | null; label: string; about: string; parts: HealthPart[]; missing: string[] };
+export type GoalProgress = { start: number; current: number; target: number; percent: number; left_kg: number };
+export type Family = { members: Member[]; star: string | null; about: string; goals: Record<string, string>; activity: string[] };
 
 export type ShelfItem = {
   key: string; name: string; qty: number; added: number; days: number; store: string;

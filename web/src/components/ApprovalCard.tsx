@@ -9,8 +9,10 @@ import { cn } from "@/lib/utils";
 
 const KIND: Record<string, string> = {
   order: "Order", booking: "Booking", hold: "Held slot", brief: "Doctor brief", meds: "Prescription",
-  alert: "Urgent", info: "Update", followup: "Follow-up", plan: "Meal plan",
+  alert: "Urgent", info: "Update", followup: "Follow-up", plan: "Meal plan", bookreq: "Doctor's appointment",
+  clinic: "Clinic found", relay: "Medicines",
 };
+const EXPERT: Record<string, string> = { home: "Family", health: "Health", kitchen: "Kitchen", doorstep: "Doorstep", caller: "Calls" };
 const SAFETY: Record<string, [string, "ok" | "warn" | "muted"]> = {
   passed: ["Safety passed", "ok"], blocked: ["Safety held", "warn"], unchecked: ["Safety off", "muted"],
 };
@@ -18,7 +20,7 @@ const SAFETY: Record<string, [string, "ok" | "warn" | "muted"]> = {
 function storeOf(c: CardRow["card"]) {
   if (c.payload?.store === "zepto") return "Zepto";
   if (c.kind === "order") return "Instamart";
-  return c.expert[0].toUpperCase() + c.expert.slice(1);
+  return EXPERT[c.expert] ?? c.expert[0].toUpperCase() + c.expert.slice(1);
 }
 
 export function ApprovalCard({ row }: { row: CardRow }) {

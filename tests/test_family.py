@@ -165,6 +165,7 @@ def test_booking_saved_clinic_or_find_then_add_to_household(tmp_path, monkeypatc
     assert job["kind"] == "book" and job["payload"]["window_start"] == "2026-12-01T00:00" and job["payload"]["part"] == "morning"
     new = h.request_card({"patient": "Amma", "hospital": "Care Hospitals", "doctor": "Dr. Kumar", "area": "Banjara Hills"})
     assert new.choices[0]["id"] == "find"
+    assert "to be assigned" not in " ".join(h.request_card({"patient": "Amma", "hospital": "Yashoda", "doctor": "Doctor to be assigned"}).lines)
     monkeypatch.setattr(finder, "find_clinic", lambda *a, **k: {"clinic": "CARE Hospitals Banjara Hills", "doctor": "Dr. Kumar",
                                                               "phone": "040 6165 6565", "phone_e164": "+914061656565",
                                                               "address": "Road No. 1", "source": "https://example.org"})

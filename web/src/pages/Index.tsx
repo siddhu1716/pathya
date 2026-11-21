@@ -1,16 +1,16 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Camera, History, Home, Loader2, Package, Users, UtensilsCrossed } from "lucide-react";
+import { Camera, Home, Loader2, Menu, Package, Users, UtensilsCrossed } from "lucide-react";
 import { ScanSheet } from "@/components/Scan";
 import { Button } from "@/components/ui/button";
 import { ApprovalCard } from "@/components/ApprovalCard";
 import { CallHistory } from "@/components/CallHistory";
-import { FamilyTab, FamilyToday } from "@/components/FamilyTab";
+import { FamilyStrip, FamilyTab } from "@/components/FamilyTab";
 import { KitchenTab } from "@/components/KitchenTab";
 import { Dot, Panel, Pill, Section } from "@/components/kit";
 import { LiveCallBanner } from "@/components/LiveCall";
 import { OrderTracker } from "@/components/OrderTracker";
-import { AskBox, StartActions } from "@/components/StartActions";
+import { CallSettings, QuickActions } from "@/components/QuickActions";
 import { Timeline } from "@/components/Timeline";
 import { UpNext } from "@/components/UpNext";
 import { AtHome } from "@/components/HomeStock";
@@ -23,7 +23,7 @@ const TABS: { id: Tab; label: string; icon: typeof Home }[] = [
   { id: "family", label: "Family", icon: Users },
   { id: "meals", label: "Meals", icon: UtensilsCrossed },
   { id: "orders", label: "Orders", icon: Package },
-  { id: "more", label: "More", icon: History },
+  { id: "more", label: "More", icon: Menu },
 ];
 
 function Lines({ s }: { s: AppState }) {
@@ -47,10 +47,10 @@ function Lines({ s }: { s: AppState }) {
   );
 }
 
-function AtHomeSection({ s }: { s: AppState }) {
+function RunningLow({ s }: { s: AppState }) {
   const { data } = useQuery({ queryKey: ["kitchen"], queryFn: api.kitchen, refetchInterval: 5000 });
-  if (!data?.pantry.length) return null;
-  return <Section label="At home"><AtHome state={s} compact /></Section>;
+  if (!data?.pantry.some((i) => i.low)) return null;
+  return <Section label="Running low"><AtHome state={s} compact /></Section>;
 }
 
 /** Shown when the server can't be reached: the UI may be hosted (Vercel) and need the tunnel URL and key. */
@@ -73,6 +73,7 @@ function Connect({ error }: { error: string }) {
 
 const Index = () => {
   const [tab, setTab] = useState<Tab>("home");
+  const [member, setMember] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
   const { data: s, error } = useQuery({ queryKey: ["state"], queryFn: api.state, refetchInterval: 2000 });
 
@@ -84,18 +85,21 @@ const Index = () => {
 
   const active = s.orders.filter((o) => !o.delivered && o.store !== "dry run");
   const cards = s.cards;
+  const go = (t: Tab) => { setTab(t); if (t !== "family") setMember(null); window.scrollTo({ top: 0 }); };
+  const hour = new Date().getHours();
+  const hello = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
 
   return (
     <div className="min-h-[100dvh] bg-background">
       <header className="sticky top-0 z-40 bg-background/85 backdrop-blur border-b">
         <div className="max-w-xl mx-auto px-4 h-14 flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <span className="w-7 h-7 rounded-md bg-primary text-primary-foreground flex items-center justify-center text-[13px] font-semibold">Q</span>
+          <button className="flex items-center gap-2.5" onClick={() => go("home")}>
+            <span className="w-7 h-7 rounded-md bg-primary text-primary-foreground flex items-center justify-center text-[13px] font-semibold">P</span>
             <span className="text-[15px] font-medium tracking-tight">Pathya</span>
-          </div>
+          </button>
           <div className="flex items-center gap-2">
             {s.live.length > 0 && <Pill tone="ok"><Dot tone="ok" pulse /> On a call</Pill>}
-            {s.dry_run ? <Pill tone="warn">Dry run</Pill> : <Pill tone="ok">Live orders</Pill>}
+            {s.dry_run && <Pill tone="warn">Dry run</Pill>}
             <button aria-label="Scan a photo" onClick={() => setScanning(true)}
                     className="w-9 h-9 rounded-full border flex items-center justify-center active:bg-white/5">
               <Camera className="w-4 h-4" />
@@ -103,18 +107,21 @@ const Index = () => {
           </div>
         </div>
       </header>
-
       <ScanSheet open={scanning} onClose={() => setScanning(false)} />
+
       <main className="max-w-xl mx-auto px-4 pt-5 pb-28 space-y-7">
         {s.live.map((c) => <LiveCallBanner key={c.id} call={c} />)}
 
         {tab === "home" && (
           <>
             <div className="space-y-1 px-1">
-              <h1 className="text-[26px] leading-tight font-medium tracking-tight">Hi {s.user}.</h1>
-              <p className="text-[15px] text-muted-foreground">Family nutrition, from a phone call to the plate.</p>
+              <h1 className="text-[26px] leading-tight font-medium tracking-tight">{hello}, {s.user}.</h1>
+              <p className="text-[15px] text-muted-foreground">The right food and care for everyone at home.</p>
             </div>
-            <AskBox />
+
+            <Section label="Family" right={<button className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground" onClick={() => go("family")}>All</button>}>
+              <FamilyStrip onOpen={(k) => { setMember(k); go("family"); }} />
+            </Section>
 
             {cards.length > 0 && (
               <Section label={`Needs you · ${cards.length}`}>
@@ -128,21 +135,17 @@ const Index = () => {
               </Section>
             )}
 
+            <Section label="Do something"><QuickActions state={s} onScan={() => setScanning(true)} onMeals={() => go("meals")} /></Section>
+
             {(s.jobs.length > 0 || s.ringing.length > 0) && (
               <Section label="Up next"><UpNext jobs={s.jobs} ringing={s.ringing} people={s.people} /></Section>
             )}
 
-            <Section label="Family today" right={<button className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground" onClick={() => setTab("family")}>All</button>}>
-              <FamilyToday onOpen={() => { setTab("family"); window.scrollTo({ top: 0 }); }} />
-            </Section>
-
-            <AtHomeSection s={s} />
-
-            <Section label="Start"><StartActions state={s} /></Section>
+            <RunningLow s={s} />
           </>
         )}
 
-        {tab === "family" && <FamilyTab state={s} />}
+        {tab === "family" && <FamilyTab pick={member} setPick={setMember} />}
 
         {tab === "meals" && <KitchenTab state={s} />}
 
@@ -155,13 +158,14 @@ const Index = () => {
 
         {tab === "more" && (
           <>
+            <Section label="Calls"><CallSettings state={s} /></Section>
+            <Section label="Call history"><CallHistory /></Section>
             {s.recent.length > 0 && (
               <Section label="Recently handled">
                 <div className="space-y-3">{s.recent.slice(0, 4).map((row) => <ApprovalCard key={row.id} row={row} />)}</div>
               </Section>
             )}
-            <Section label="Calls"><CallHistory /></Section>
-            <Section label="Lines"><Lines s={s} /></Section>
+            <Section label="Connections"><Lines s={s} /></Section>
             <Section label="Activity"><Timeline events={s.timeline} /></Section>
           </>
         )}
@@ -172,7 +176,7 @@ const Index = () => {
           {TABS.map((t) => {
             const badge = t.id === "home" ? cards.length : t.id === "orders" ? active.length : 0;
             return (
-              <button key={t.id} onClick={() => { setTab(t.id); window.scrollTo({ top: 0 }); }}
+              <button key={t.id} onClick={() => go(t.id)}
                       className={cn("h-16 flex flex-col items-center justify-center gap-1 relative",
                         tab === t.id ? "text-foreground" : "text-muted-foreground")}>
                 <t.icon className="w-5 h-5" strokeWidth={tab === t.id ? 2 : 1.5} />

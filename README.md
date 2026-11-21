@@ -44,8 +44,22 @@ and turns what is missing into a Swiggy Instamart cart you approve with one tap.
   The cart, total, address and payment are shown; nothing is placed without your tap. `DRY_RUN=1` is the default.
 - **At home:** delivered orders stock a pantry with shelf-life estimates. When something is running low, a reorder is
   one tap away.
-- **Leaderboard:** weekly points for habits (meals logged, close to your own targets, doses taken, calls answered).
-  Readings and weight never score.
+- **Health score:** 0-100 per person over the last 7 days, built from habits only:
+  - food 40: meals logged and close to their own targets;
+  - medicines 30: doses taken as written;
+  - movement 15: steps from a watch;
+  - check-in calls 15: calls answered.
+
+  Tap it for the breakdown and what would raise it. Readings and weight never count; it is not a medical test.
+- **Goal bars:** every target shows the percentage reached. Bulk or cut with a goal weight shows how far along it is.
+- **Parents:** the evening check-in call is on by default for parents and members 60+ with a phone.
+- **Book a doctor:** two ways.
+  - "Pathya plans it": Pathya calls you, asks who it's for, the reason in their words, the place and the days, and
+    shows a card.
+  - "I know where": type the hospital or doctor.
+
+  A clinic that isn't saved yet is looked up on the web (number and source shown). It is added to `household.yaml`
+  and phoned only after your tap.
 
 Pathya never diagnoses and never suggests, starts, stops or changes a medicine or dose (see [AGENTS.md](AGENTS.md)).
 
