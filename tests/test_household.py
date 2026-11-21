@@ -90,3 +90,50 @@ def test_phone_from_the_app_report_and_call_buttons(tmp_path, monkeypatch):
         app.state.live[jid] = {"who": "Shiva", "lines": []}
         app.state.hangups[jid] = close
         assert c.post(f"/api/calls/{jid}/hangup").json()["ok"] and closed == [True]
+
+
+def test_pharmacy_found_near_you_is_added_only_after_a_tap_and_the_call_never_orders(tmp_path, monkeypatch):
+    import asyncio
+    from app.experts.family import meds as M
+    from app.experts.health import pharmacy
+    app, store, _ = env()
+    path = tmp_path / "household.yaml"
+    path.write_text(YAML + "pharmacies: {}\n", encoding="utf-8")
+    app.state.household = hh = yaml.safe_load(path.read_text(encoding="utf-8"))
+    for e in app.state.experts.values():
+        e.hh = hh
+    health = app.state.experts["health"]
+    health.path = str(path)
+    M.add(store, "amma", "Tab. Simvotin 10mg", "1", ["night"])
+    seen = {}
+
+    def find(lat, lng, area, city):
+        seen.update(lat=lat, lng=lng, area=area)
+        return {"area": "Madhapur", "pharmacies": [
+            {"name": "Apollo Pharmacy Madhapur", "phone": "040 2311 2345", "phone_e164": "+914023112345",
+             "address": "Ayyappa Society", "delivers": True, "source": "https://www.apollopharmacy.in/"}]}
+    monkeypatch.setattr(pharmacy, "find", find)
+    with TestClient(app) as c:
+        assert c.post("/api/health/pharmacy", json={"who": "amma"}).status_code == 400          # no location, no area
+        assert c.post("/api/health/pharmacy", json={"who": "me", "area": "Madhapur"}).status_code == 400   # no medicines
+        r = c.post("/api/health/pharmacy", json={"who": "amma", "lat": 17.4486, "lng": 78.3908}).json()
+        assert seen["lat"] == 17.4486 and r["count"] == 1
+        assert "apollo" not in path.read_text(encoding="utf-8").lower()                          # nothing added yet
+        links = c.get("/api/health/pharmacy/links?who=amma").json()
+        assert links[0]["links"]["Tata 1mg"] == "https://www.1mg.com/search/all?name=Simvotin%2010mg"
+        out = c.post(f"/api/cards/{r['card']}/tap", json={"choice": "call:0"}).json()["result"]
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        assert data["pharmacies"]["apollo-pharmacy-madhapur"]["phone"] == "+914023112345"       # rule 8: listed first
+        assert "# Who Pathya works for." in path.read_text(encoding="utf-8")
+    job = store.job(out["jobs"][0])
+    assert job["kind"] == "pharmacy" and job["payload"]["to"] == "+914023112345" and job["payload"]["meds"] == ["Tab. Simvotin 10mg 1"]
+    plan = health.call_plan(job)
+    assert "Do not place the order" in plan.instructions and "Tab. Simvotin 10mg 1" in plan.instructions
+    tools = {f.__name__: f for f in plan.tools}
+    tools["save_answer"](["Tab. Simvotin 10mg"], [], ["Simcard 10"], "Rs 180", True, "2 hours", "98480 22338", "")
+    card = asyncio.run(health.after_call(job, plan.saved))
+    assert card.kind == "pharmacy_answer" and "1 of 1 available" in card.title
+    assert any("not accepted" in l and "Simcard 10" in l for l in card.lines)
+    assert card.payload["wa"].startswith("https://wa.me/919848022338?text=") and "Simvotin" in card.payload["share_text"]
+    assert pharmacy.add_to_household(str(path), hh, {"name": "Apollo again", "phone_e164": "+914023112345"}) == \
+        "apollo-pharmacy-madhapur"                                                                  # same number: reused

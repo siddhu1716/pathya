@@ -17,3 +17,4 @@ web/dist/
 .server.log
 .server*.log
 mobile/pathya.apk
+photos/

@@ -16,6 +16,8 @@ If they are outside, lost or need {user} now, call notify_owner. If the caller i
 message with take_message. Keep the call under two minutes. Finish with end_call."""
 
 DEFAULT_INSTRUCTIONS = "Please call again; the family will come down to collect it."
+KNOWN = ("\nThis caller is {name}, from {user}'s family, not a delivery partner: greet them by name, say {user} could "
+         "not pick up, and take their message with take_message.")
 
 
 class DoorstepExpert(Expert):
@@ -26,10 +28,12 @@ class DoorstepExpert(Expert):
     def __init__(self, store, household):
         self.store, self.hh = store, household
 
-    def answered(self, call_sid, caller_last4):
-        """An incoming call becomes a job that has already 'run' (so the scheduler never dials it)."""
+    def answered(self, call_sid, caller_last4, known=None):
+        """An incoming call becomes a job that has already 'run' (so the scheduler never dials it). known: the
+        caller's name when their number is in household.yaml (a forwarded call from family)."""
         jid = self.store.add_job(self.name, "doorstep", "caller",
-                                 {"direction": "inbound", "caller": f"…{caller_last4}"}, run_at=4102444800)
+                                 {"direction": "inbound", "caller": f"…{caller_last4}", **({"known": known} if known else {})},
+                                 run_at=4102444800)
         self.store.start_job(jid)
         self.store.end_job(jid, True, {"call_sid": call_sid})
         return jid
@@ -47,7 +51,8 @@ class DoorstepExpert(Expert):
         language = lang.default(self.hh)
         greeting = lang.greet(language, "phone", user)
         plan = CallPlan(DOORSTEP_CALL.format(user=user, greeting=greeting, orders=self.on_the_way(), speak=lang.speak(language),
-                                             instructions=self.hh.get("delivery_instructions") or DEFAULT_INSTRUCTIONS),
+                                             instructions=self.hh.get("delivery_instructions") or DEFAULT_INSTRUCTIONS)
+                        + (KNOWN.format(name=job["payload"]["known"], user=user) if job["payload"].get("known") else ""),
                         greeting, max_minutes=3, language=language)
         s = plan.saved
 
@@ -73,7 +78,7 @@ class DoorstepExpert(Expert):
         lines = [saved.get("summary") or "The caller hung up."]
         if saved.get("message"):
             lines.append(f"Message from {saved['message'].get('from') or 'the caller'}: {saved['message']['text']}")
-        caller = job["payload"].get("caller", "")
+        caller = f"from {job['payload']['known']}" if job["payload"].get("known") else job["payload"].get("caller", "")
         return Card(self.name, "info", f"Pathya answered a call {caller}".strip(), lines, question="",
                     choices=[{"id": "ok", "label": "OK"}])
 

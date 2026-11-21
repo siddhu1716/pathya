@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { Camera, Download, Home, Loader2, Menu, Package, Smartphone, Users, UtensilsCrossed } from "lucide-react";
 import { toast } from "sonner";
 import { ScanSheet } from "@/components/Scan";
@@ -63,7 +63,8 @@ function AndroidApp() {
       </Panel>
     );
   }
-  const link = `${server() || window.location.origin}/${key() ? `?key=${encodeURIComponent(key())}` : ""}`;
+  const shareable = key() && !key().startsWith("pathya_");          // a phone sign-in session is never shared
+  const link = `${server() || window.location.origin}/${shareable ? `?key=${encodeURIComponent(key())}` : ""}`;
   return (
     <Panel className="p-4 space-y-3">
       <p className="text-[14px]">Install Pathya on an Android phone: download it, open the file and allow installs from this browser once.
@@ -84,15 +85,74 @@ function RunningLow({ s }: { s: AppState }) {
   return <Section label="Running low"><AtHome state={s} compact /></Section>;
 }
 
-/** Shown when the server can't be reached: the UI may be hosted (Vercel) and need the tunnel URL and key. */
+const field = "w-full rounded-xl border bg-white/[0.03] px-3 py-2.5 text-[15px] outline-none focus:border-white/30";
+
+/** Shown when the app can't open: sign in with your phone number (a code by SMS), or paste your Pathya link. */
 function Connect({ error }: { error: string }) {
-  const [srv, setSrv] = useState(server());
-  const [k, setK] = useState(key());
-  const field = "w-full rounded-xl border bg-white/[0.03] px-3 py-2.5 text-[15px] outline-none focus:border-white/30";
+  const { data: auth } = useQuery({ queryKey: ["auth-status"], queryFn: api.authStatus, retry: false });
+  const [mode, setMode] = useState<"phone" | "link">("phone");
+  const phoneOk = !!auth?.phone_sign_in;
   return (
     <div className="min-h-[100dvh] max-w-sm mx-auto px-6 flex flex-col justify-center gap-4">
-      <h1 className="text-[22px] font-medium tracking-tight">Connect to Pathya</h1>
-      <p className="text-[14px] text-muted-foreground">{error}</p>
+      <span className="w-10 h-10 rounded-lg bg-primary text-primary-foreground flex items-center justify-center text-[15px] font-semibold">P</span>
+      {phoneOk && mode === "phone" ? <PhoneSignIn onLink={() => setMode("link")} /> : (
+        <>
+          <h1 className="text-[22px] font-medium tracking-tight">Connect to Pathya</h1>
+          {!/key needed/i.test(error) && <p className="text-[14px] text-muted-foreground">{error}</p>}
+          <LinkForm />
+          {phoneOk && <button className="text-[14px] text-muted-foreground underline underline-offset-4" onClick={() => setMode("phone")}>Sign in with your phone number</button>}
+        </>
+      )}
+    </div>
+  );
+}
+
+function PhoneSignIn({ onLink }: { onLink: () => void }) {
+  const [phone, setPhone] = useState("");
+  const [code, setCode] = useState("");
+  const [sentTo, setSentTo] = useState<string | null>(null);
+  const fail = (e: Error) => toast.error(e.message);
+  const start = useMutation({ mutationFn: () => api.signInStart(phone), onSuccess: (r) => setSentTo(r.to), onError: fail });
+  const check = useMutation({
+    mutationFn: () => api.signInCheck(phone, code),
+    onSuccess: (r) => { connect(server(), r.token); window.location.reload(); },
+    onError: fail,
+  });
+  return (
+    <>
+      <h1 className="text-[22px] font-medium tracking-tight">Sign in to Pathya</h1>
+      <p className="text-[14px] text-muted-foreground">
+        {sentTo ? `We texted a code to ${sentTo}.` : "Your phone number, as it is in your family's Pathya. We'll text you a code."}
+      </p>
+      {!sentTo ? (
+        <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); if (phone.trim()) start.mutate(); }}>
+          <input className={field} type="tel" inputMode="tel" autoComplete="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="98480 22338" autoFocus />
+          <Button type="submit" className="w-full h-12" disabled={start.isPending || phone.replace(/\D/g, "").length < 10}>
+            {start.isPending && <Loader2 className="animate-spin" />} Send code
+          </Button>
+        </form>
+      ) : (
+        <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); if (code.trim()) check.mutate(); }}>
+          <input className={cn(field, "font-mono tracking-[0.3em] text-center text-[20px]")} inputMode="numeric" autoComplete="one-time-code"
+                 value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="••••••" autoFocus />
+          <Button type="submit" className="w-full h-12" disabled={check.isPending || code.length < 4}>
+            {check.isPending && <Loader2 className="animate-spin" />} Sign in
+          </Button>
+          <button type="button" className="w-full text-[13px] text-muted-foreground" disabled={start.isPending} onClick={() => { setCode(""); start.mutate(); }}>
+            Send a new code
+          </button>
+        </form>
+      )}
+      <button className="text-[13px] text-muted-foreground underline underline-offset-4" onClick={onLink}>I have a Pathya link instead</button>
+    </>
+  );
+}
+
+function LinkForm() {
+  const [srv, setSrv] = useState(server());
+  const [k, setK] = useState(key().startsWith("pathya_") ? "" : key());
+  return (
+    <>
       <p className="text-[14px] text-muted-foreground">Paste your Pathya link (the one with ?key=). Apps added to the Home Screen need it once.</p>
       <form className="space-y-3" onSubmit={(e) => {
         e.preventDefault();
@@ -109,7 +169,27 @@ function Connect({ error }: { error: string }) {
         <input className={field} value={k} onChange={(e) => setK(e.target.value)} placeholder="Key (if not in the link)" />
         <Button type="submit" className="w-full h-12">Connect</Button>
       </form>
-    </div>
+    </>
+  );
+}
+
+/** More tab: who is signed in on this phone. */
+function Account() {
+  const { data: me } = useQuery({ queryKey: ["me"], queryFn: api.me });
+  if (!me || me.via === "open") return null;
+  const out = async () => {
+    await api.signOut().catch(() => undefined);
+    connect(server(), "");
+    window.location.reload();
+  };
+  return (
+    <Panel className="flex items-center justify-between gap-3 px-4 py-3">
+      <span className="min-w-0">
+        <span className="block text-[15px]">{me.name}</span>
+        <span className="block text-[12px] text-muted-foreground">{me.via === "phone" ? `Signed in with …${me.phone_end}` : "Opened with the Pathya link"}</span>
+      </span>
+      <Button variant="outline" size="sm" className="shrink-0" onClick={out}>{me.via === "phone" ? "Sign out" : "Forget link"}</Button>
+    </Panel>
   );
 }
 
@@ -207,6 +287,7 @@ const Index = () => {
 
         {tab === "more" && (
           <>
+            <Section label="Account"><Account /></Section>
             <Section label="Calls"><CallSettings state={s} /></Section>
             <Section label="Pathya's voice"><VoicePanel /></Section>
             <Section label="Answer my calls"><Forwarding /></Section>

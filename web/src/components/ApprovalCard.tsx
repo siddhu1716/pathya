@@ -1,16 +1,16 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { CalendarPlus, ExternalLink, Loader2 } from "lucide-react";
+import { CalendarPlus, ExternalLink, Loader2, Share2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Dot, Panel, Pill } from "@/components/kit";
+import { Dot, Panel, Photo, Pill } from "@/components/kit";
 import { api, CardRow } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 const KIND: Record<string, string> = {
   order: "Order", booking: "Booking", hold: "Held slot", brief: "Doctor brief", meds: "Prescription",
   alert: "Urgent", info: "Update", followup: "Follow-up", plan: "Meal plan", bookreq: "Doctor's appointment",
-  clinic: "Clinic found", relay: "Medicines",
+  clinic: "Clinic found", relay: "Medicines", pharmacies: "Pharmacies", pharmacy_answer: "Pharmacy",
 };
 const EXPERT: Record<string, string> = { home: "Family", health: "Health", kitchen: "Kitchen", doorstep: "Doorstep", caller: "Calls" };
 const SAFETY: Record<string, [string, "ok" | "warn" | "muted"]> = {
@@ -60,7 +60,10 @@ export function ApprovalCard({ row }: { row: CardRow }) {
       </div>
 
       <div className="space-y-2">
-        <h3 className="text-lg font-medium leading-snug">{c.title}</h3>
+        <div className="flex gap-3">
+          {c.payload?.photo && <Photo id={c.payload.photo} alt="Prescription photo" className="w-16 h-16" />}
+          <h3 className="text-lg font-medium leading-snug">{c.title}</h3>
+        </div>
         {c.lines.filter(Boolean).length > 0 && (
           <ul className="space-y-1 text-[14px] text-foreground/85">
             {c.lines.filter(Boolean).map((l, i) => <li key={i} className="whitespace-pre-line">{l}</li>)}
@@ -87,6 +90,8 @@ export function ApprovalCard({ row }: { row: CardRow }) {
           ))}
         </ul>
       )}
+
+      {c.payload?.photo && c.payload?.share_text && <SharePhoto id={c.payload.photo} text={c.payload.share_text} />}
 
       {waiting ? (
         <div className="space-y-3">
@@ -120,6 +125,34 @@ export function ApprovalCard({ row }: { row: CardRow }) {
         <Outcome row={row} />
       )}
     </Panel>
+  );
+}
+
+/** Send the prescription photo itself (WhatsApp links can't attach it): the phone's share sheet, else open the photo. */
+function SharePhoto({ id, text }: { id: string; text: string }) {
+  const [busy, setBusy] = useState(false);
+  const share = async () => {
+    setBusy(true);
+    try {
+      const blob = await (await fetch(api.photoUrl(id))).blob();
+      const file = new File([blob], "prescription.jpg", { type: blob.type || "image/jpeg" });
+      if (navigator.canShare?.({ files: [file] })) {
+        await navigator.share({ files: [file], text });
+      } else {
+        await navigator.clipboard?.writeText(text).catch(() => undefined);
+        window.open(api.photoUrl(id), "_blank", "noopener");
+        toast.message("Photo opened and the list copied: save the photo and attach it in WhatsApp.");
+      }
+    } catch (e) {
+      if ((e as Error).name !== "AbortError") toast.error("Could not share the photo.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Button variant="outline" className="w-full h-11" disabled={busy} onClick={share}>
+      {busy ? <Loader2 className="animate-spin" /> : <Share2 />} Share the prescription photo
+    </Button>
   );
 }
 

@@ -1,4 +1,7 @@
-import { ChevronRight } from "lucide-react";
+import { useState } from "react";
+import { createPortal } from "react-dom";
+import { ChevronRight, X } from "lucide-react";
+import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 export function Section({ label, right, children, className }: {
@@ -95,5 +98,29 @@ export function Pill({ children, tone = "muted", className }: {
     }[tone], className)}>
       {children}
     </span>
+  );
+}
+
+/** A scanned photo: a small thumbnail that opens full screen (tap anywhere to close). */
+export function Photo({ id, alt = "Photo", className }: { id: string; alt?: string; className?: string }) {
+  const [open, setOpen] = useState(false);
+  const src = api.photoUrl(id);
+  return (
+    <>
+      <button type="button" onClick={() => setOpen(true)} aria-label={`Open ${alt.toLowerCase()}`}
+              className={cn("shrink-0 overflow-hidden rounded-lg border bg-white/[0.03]", className ?? "w-11 h-11")}>
+        <img src={src} alt={alt} loading="lazy" className="w-full h-full object-cover" />
+      </button>
+      {open && createPortal(
+        <div role="dialog" aria-label={alt} onClick={() => setOpen(false)}
+             className="fixed inset-0 z-[100] bg-black/95 flex items-center justify-center p-3 pb-[max(12px,env(safe-area-inset-bottom))]">
+          <img src={src} alt={alt} className="max-w-full max-h-full object-contain rounded-lg" />
+          <span className="absolute top-4 right-4 w-9 h-9 rounded-full border border-white/20 flex items-center justify-center text-white">
+            <X className="w-4 h-4" />
+          </span>
+        </div>,
+        document.body,
+      )}
+    </>
   );
 }

@@ -215,7 +215,7 @@ export function Forwarding() {
   return (
     <Panel className="p-4 space-y-3">
       <p className="text-[14px]">When you can't pick up, your phone forwards the call to <span className="font-mono">{f.number}</span> and Pathya answers:
-        it says it is your AI assistant, takes Amma's order or guides the delivery partner, and tells you here.</p>
+        it says it is your AI assistant, guides the delivery partner to you (or takes a message from anyone else) and tells you here.</p>
       <ol className="text-[13px] space-y-1.5 list-decimal pl-5 text-muted-foreground">
         <li>Exotel: in the call flow for {f.number}, add a <b>Voicebot</b> step with the URL below, then Hangup.</li>
         <li>On your Jio phone, dial a code below (tap to copy). Other networks: {f.other_networks}.</li>
@@ -256,7 +256,8 @@ export function CallSettings({ state }: { state: AppState }) {
           ))}
         </div>
       </div>
-      <p className="text-[12px] text-muted-foreground">Twilio trial: after the short English message, press any key so Pathya starts talking. Jio numbers can't receive these calls.</p>
+      <p className="text-[12px] text-muted-foreground">Pathya's calls go out on Twilio ({state.phone_number}). Trial: after the short English message, press any key.
+        Jio numbers refuse Twilio calls: put a non-Jio number in Family &gt; You &gt; Phone; until then a refused call rings here instead.</p>
     </Panel>
   );
 }

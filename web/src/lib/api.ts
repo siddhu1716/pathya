@@ -217,14 +217,30 @@ export const api = {
   addMed: (k: string, med: { name: string; dose: string; times: string[]; days: number | null; food: string }) =>
     post<Member>(`/api/family/${k}/meds`, med),
   removeMed: (k: string, i: number) => request<Member>(`/api/family/${k}/meds/${i}`, { method: "DELETE" }),
+  /** "Matches the paper": the family checked a prescription line and set its times. */
+  checkMed: (k: string, i: number, times: string[]) =>
+    request<Member>(`/api/family/${k}/meds/${i}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ times }) }),
+  mealSlot: (who: string, id: string, meal: string) =>
+    request<MealEntry>("/api/kitchen/meal", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ who, id, meal }) }),
+  photoUrl: (id: string) => `${server()}/api/photos/${id}${key() ? `?key=${encodeURIComponent(key())}` : ""}`,
+  authStatus: () => request<{ phone_sign_in: boolean; needed: boolean }>("/api/auth/status"),
+  signInStart: (phone: string) => post<{ sent: boolean; to: string }>("/api/auth/start", { phone }),
+  signInCheck: (phone: string, code: string) => post<{ token: string; who: string; name: string }>("/api/auth/check", { phone, code }),
+  me: () => request<{ via: "phone" | "link" | "open"; who: string; name: string; phone_end?: string }>("/api/auth/me"),
+  signOut: () => post<{ ok: boolean }>("/api/auth/signout"),
+  findPharmacy: (b: { who: string; lat?: number; lng?: number; area?: string; meds?: number[] }) =>
+    post<{ card: string; area: string; count: number }>("/api/health/pharmacy", b),
+  pharmacyLinks: (who: string) => request<{ name: string; links: Record<string, string> }[]>(`/api/health/pharmacy/links?who=${encodeURIComponent(who)}`),
   reminders: (k: string, on: boolean) => post<{ ok: boolean }>(`/api/family/${k}/reminders`, { on }),
   callMember: (k: string) => post<{ job: string }>(`/api/family/${k}/call${via()}`),
   dailyMember: (k: string, hour: number | null) => post<{ ok: boolean }>(`/api/family/${k}/daily`, { hour }),
   dose: (k: string, slot: string, taken = "yes", words = "") => post<Member>(`/api/family/${k}/dose`, { slot, taken, words }),
-  scan: (who: string, photo: File) => {
+  /** taken: when the photo was taken (ms), so the meal is breakfast, lunch, snack or dinner by its time. */
+  scan: (who: string, photo: Blob, taken?: number) => {
     const form = new FormData();
     form.append("who", who);
-    form.append("photo", photo);
+    if (taken) form.append("taken", String(Math.round(taken)));
+    form.append("photo", photo, "photo.jpg");
     return request<ScanResult>("/api/scan", { method: "POST", body: form });
   },
   portion: (day: number, meal: number, part: number, who: string, qty: number) =>
@@ -260,10 +276,10 @@ export type VoicePrompt = { who: string; greeting: string; prompt: string; tools
 export type BodyReport = { date?: string | null; weight_kg?: number | null; height_cm?: number | null; body_fat_pct?: number | null;
   skeletal_muscle_kg?: number | null; fat_mass_kg?: number | null; bmr_kcal?: number | null; visceral_fat_level?: number | null };
 export type ScanResult =
-  | { kind: "meal"; note: string; entry: MealEntry }
+  | { kind: "meal"; note: string; entry: MealEntry; photo?: string | null }
   | { kind: "medicine"; note: string; medicines: { name_as_printed: string; strength: string | null; form: string | null; unclear: boolean }[];
       matches: string[]; due: Dose[] }
-  | { kind: "prescription"; note: string; card: string }
+  | { kind: "prescription"; note: string; card: string; photo?: string | null; count?: number }
   | { kind: "body_report"; note: string; report: BodyReport }
   | { kind: "other"; note: string };
 export type Checkup = { what: string; why: string; source: string };
@@ -273,7 +289,8 @@ export type Forwarding = { number: string | null; voicebot_url: string | null; c
 export type Targets = Macros & { sugar_g: number; salt_g: number; source: string };
 export type Dose = { slot: string; hour: number; meds: string[]; taken: "yes" | "no" | "not_sure" | null; words: string | null };
 export type Med = { name_as_written: string; dose?: string | null; strength?: string | null; food?: string | null;
-  days?: number | null; morning?: boolean; afternoon?: boolean; night?: boolean; source?: string };
+  days?: number | null; morning?: boolean; afternoon?: boolean; night?: boolean; source?: string; unclear?: boolean;
+  photo?: string | null };
 export type ProfileIn = {
   relation: string; age: number | null; sex: string; height_cm: number | null; weight_kg: number | null; activity: string;
   food: string; allergies: string; conditions: string[]; goal: string; override: Partial<Macros>; body: BodyReport;
@@ -295,7 +312,7 @@ export type ShelfItem = {
   key: string; name: string; qty: number; added: number; days: number; store: string;
   left: number; days_left: number; low: boolean;
 };
-export type MealEntry = Macros & { text: string; meal: string; ts: number; sugar_g?: number };
+export type MealEntry = Macros & { text: string; meal: string; ts: number; sugar_g?: number; id?: string; photo?: string | null };
 export type Today = { meals: MealEntry[]; total: Macros & { sugar_g?: number }; targets: Macros & { source: string; sugar_g?: number } };
 
 export type Usual = { name: string; count: number; typical: number; days_ago: number; store: string; price?: number };

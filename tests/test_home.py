@@ -135,7 +135,7 @@ def test_ring_in_browser_override_and_failed_call_card(monkeypatch):
     assert "ringing in the app" in card["title"] and "Jio" in card["lines"][0]             # your phone refused it
     again = [j for j in store.upcoming() if j["person"] == "me"][-1]
     assert again["payload"]["via"] == "browser" and again["kind"] == "home"
-    assert dial("+919800000000", home.call_me()) == "browser" and len(dialled) == 1          # next calls ring the app
+    assert dial("+919800000000", home.call_me()) == "CA77" and len(dialled) == 2              # the next call: Twilio again
     amma = home.call("amma")
     assert dial("+919800000001", amma) == "CA77"                                           # others still get phone calls
     store.start_job(amma)
@@ -208,6 +208,40 @@ def test_app_key_guards_the_api(monkeypatch):
         assert client.get("/api/state?key=s3cret-key-123").json()["user"] == "Shiva"
         r = client.post("/api/orders/nope/delivered", headers={"X-QuickPick-Key": "s3cret-key-123"})
         assert r.status_code == 404
+
+
+def test_phone_sign_in_only_for_family_numbers_and_the_session_opens_the_api(monkeypatch):
+    from types import SimpleNamespace as NS
+    app, store, _ = env()
+    sent, checked = [], []
+
+    class Verify:                                   # just the bits of Twilio Verify that auth.py uses
+        def __init__(self):
+            self.v2 = NS(services=self)
+        def create(self, **kw):
+            return NS(sid="VA1")
+        def __call__(self, sid):
+            return NS(verifications=NS(create=lambda to, channel: sent.append(to) or NS(status="pending")),
+                      verification_checks=NS(create=lambda to, code: checked.append(code) or
+                                             NS(status="approved" if code == "123456" else "pending")))
+    monkeypatch.setenv("APP_KEY", "s3cret-key-123")
+    with TestClient(app) as client:
+        assert client.get("/api/auth/status").json() == {"phone_sign_in": False, "needed": True}   # open, Twilio off
+        app.state.twilio = NS(verify=Verify())
+        assert client.post("/api/auth/start", json={"phone": "+919800000002"}).status_code == 403  # the cook: no
+        assert client.post("/api/auth/start", json={"phone": "+919811111111"}).status_code == 403  # a stranger: no
+        assert client.post("/api/auth/start", json={"phone": "098000 00001"}).json() == {"sent": True, "to": "…0001"}
+        assert sent == ["+919800000001"] and client.post("/api/auth/start", json={"phone": "9800000001"}).status_code == 429
+        assert client.post("/api/auth/check", json={"phone": "9800000001", "code": "999999"}).status_code == 401
+        s = client.post("/api/auth/check", json={"phone": "9800000001", "code": "123456"}).json()
+        assert s["who"] == "amma" and s["name"] == "Amma" and s["token"].startswith("pathya_")
+        assert not any(s["token"] in str(f["key"]) + str(f["value"]) for f in store.facts("app"))   # stored hashed
+        h = {"X-QuickPick-Key": s["token"]}
+        assert client.get("/api/state", headers=h).status_code == 200
+        assert client.get("/api/auth/me", headers=h).json()["name"] == "Amma"
+        assert client.post("/api/auth/signout", headers=h).json()["ok"]
+        assert client.get("/api/state", headers=h).status_code == 401                              # signed out
+        assert client.get("/api/state", headers={"X-QuickPick-Key": "pathya_madeup"}).status_code == 401
 
 
 def test_one_check_in_call_also_takes_notes_for_the_doctor(monkeypatch):

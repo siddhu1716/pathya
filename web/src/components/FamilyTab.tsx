@@ -1,16 +1,18 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Activity, ArrowUp, Camera, ChevronDown, ChevronLeft, HeartPulse, Loader2, Phone, PhoneOutgoing, Plus, Share2, Stethoscope, Trash2, X } from "lucide-react";
+import { Activity, ArrowUp, Camera, ChevronDown, ChevronLeft, HeartPulse, Loader2, Phone, PhoneOutgoing, Plus, Share2, ShoppingBag, Stethoscope, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } from "@/components/ui/drawer";
-import { Dot, Meter, Panel, Pill, Ring, Row, Section } from "@/components/kit";
-import { ScanSheet } from "@/components/Scan";
-import { api, Dose, Family, key as appKey, Member, server } from "@/lib/api";
+import { Dot, Meter, Panel, Photo, Pill, Ring, Row, Section } from "@/components/kit";
+import { PharmacySheet } from "@/components/Pharmacy";
+import { ScanSheet, whenEaten } from "@/components/Scan";
+import { api, Dose, Family, key as appKey, Med, Member, server } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 const field = "w-full rounded-xl border bg-white/[0.03] px-3 py-2.5 text-[15px] outline-none focus:border-white/30";
 const SLOTS = ["morning", "afternoon", "night"] as const;
+const needsCheck = (x: Med) => !!x.unclear || !SLOTS.some((s) => x[s]);
 const PART: Record<string, string> = { food: "Food", medicines: "Medicines", movement: "Movement", checkins: "Check-in calls" };
 const MISSING: Record<string, string> = {
   medicines: "Counts once medicines are listed.",
@@ -209,8 +211,12 @@ function TodayPanel({ m }: { m: Member }) {
       {m.today.meals.length > 0 && (
         <ul className="space-y-1.5 border-t pt-3">
           {m.today.meals.map((x) => (
-            <li key={x.ts} className="flex justify-between gap-3 text-[14px]">
-              <span className="min-w-0 truncate"><span className="text-muted-foreground capitalize">{x.meal || "meal"}: </span>{x.text}</span>
+            <li key={x.id ?? x.ts} className="flex items-center justify-between gap-3 text-[14px]">
+              {x.photo && <Photo id={x.photo} alt={`${x.meal} photo`} className="w-10 h-10" />}
+              <span className="min-w-0 flex-1">
+                <span className="block truncate"><span className="text-muted-foreground capitalize">{x.meal || "meal"}: </span>{x.text}</span>
+                {x.photo && <span className="block font-mono text-[11px] text-muted-foreground">photo {whenEaten(x)}</span>}
+              </span>
               <span className="font-mono text-[12px] text-muted-foreground shrink-0">{x.kcal} kcal</span>
             </li>
           ))}
@@ -242,6 +248,13 @@ function MedsPanel({ m }: { m: Member }) {
     onSuccess: () => { setMed({ name: "", dose: "", food: "", days: "", times: ["morning"] }); setAdding(false); refresh(); }, onError: fail,
   });
   const remove = useMutation({ mutationFn: (i: number) => api.removeMed(m.key, i), onSuccess: refresh, onError: fail });
+  const [checking, setChecking] = useState<{ i: number; times: string[] } | null>(null);
+  const check = useMutation({
+    mutationFn: () => api.checkMed(m.key, checking!.i, checking!.times),
+    onSuccess: () => { setChecking(null); toast.success("Checked. Reminder calls now include it."); refresh(); }, onError: fail,
+  });
+  const unchecked = m.meds.filter(needsCheck).length;
+  const [ordering, setOrdering] = useState(false);
   const remind = useMutation({ mutationFn: (on: boolean) => api.reminders(m.key, on), onSuccess: refresh, onError: fail });
   const mark = useMutation({ mutationFn: (slot: string) => api.dose(m.key, slot, "yes"), onSuccess: refresh, onError: fail });
   const toggle = (s: string) => setMed({ ...med, times: med.times.includes(s) ? med.times.filter((x) => x !== s) : [...med.times, s] });
@@ -268,18 +281,44 @@ function MedsPanel({ m }: { m: Member }) {
           ))}
         </Panel>
       )}
+      {unchecked > 0 && (
+        <p className="text-[13px] text-warning/90 border-l-2 border-warning/50 pl-3">
+          {unchecked} {unchecked === 1 ? "line needs" : "lines need"} a check against the paper. Tap one, pick its times as written and
+          tap "Matches the paper". Until then reminder calls leave it out.
+        </p>
+      )}
       <Panel className="divide-y overflow-hidden">
         {m.meds.map((x, i) => (
-          <div key={i} className="flex items-center gap-3 px-4 py-3">
-            <span className="flex-1 min-w-0">
-              <span className="block text-[15px] truncate">{x.name_as_written}</span>
-              <span className="block font-mono text-[11px] text-muted-foreground">
-                {[x.dose, SLOTS.filter((s) => x[s]).join(" · "), x.food, x.days ? `${x.days} days` : ""].filter(Boolean).join(" · ")}
-              </span>
-            </span>
-            <button aria-label="Remove" className="w-8 h-8 -mr-2 flex items-center justify-center text-muted-foreground" onClick={() => remove.mutate(i)}>
-              <X className="w-4 h-4" />
-            </button>
+          <div key={i} className="px-4 py-3 space-y-3">
+            <div className="flex items-center gap-3">
+              {x.photo && <Photo id={x.photo} alt="Prescription photo" className="w-10 h-10" />}
+              <button className="flex-1 min-w-0 text-left" onClick={() => setChecking(checking?.i === i ? null : { i, times: SLOTS.filter((s) => x[s]) })}>
+                <span className="block text-[15px] truncate">{x.name_as_written}</span>
+                <span className="block font-mono text-[11px] text-muted-foreground">
+                  {[x.dose, SLOTS.filter((s) => x[s]).join(" · ") || "no time set", x.food, x.days ? `${x.days} days` : ""].filter(Boolean).join(" · ")}
+                </span>
+                {needsCheck(x) && <span className="block text-[12px] text-warning mt-0.5">{x.unclear ? "Unclear on the paper: check it" : "Pick the times"}</span>}
+              </button>
+              <button aria-label="Remove" className="w-8 h-8 -mr-2 flex items-center justify-center text-muted-foreground" onClick={() => remove.mutate(i)}>
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            {checking?.i === i && (
+              <div className="space-y-2">
+                <div className="flex gap-2">
+                  {SLOTS.map((s) => (
+                    <button type="button" key={s}
+                            onClick={() => setChecking({ i, times: checking.times.includes(s) ? checking.times.filter((t) => t !== s) : [...checking.times, s] })}
+                            className={cn("flex-1 h-9 rounded-full border text-[13px] capitalize", checking.times.includes(s) ? "bg-primary text-primary-foreground border-primary" : "text-muted-foreground")}>
+                      {s}
+                    </button>
+                  ))}
+                </div>
+                <Button className="w-full h-10" disabled={check.isPending || !checking.times.length} onClick={() => check.mutate()}>
+                  {check.isPending && <Loader2 className="animate-spin" />} Matches the paper
+                </Button>
+              </div>
+            )}
           </div>
         ))}
         {adding ? (
@@ -303,12 +342,16 @@ function MedsPanel({ m }: { m: Member }) {
         ) : (
           <Row icon={Plus} title="Add a medicine" sub="Type it, or scan the strip or prescription" onClick={() => setAdding(true)} />
         )}
+        {m.meds.length > 0 && (
+          <Row icon={ShoppingBag} title="Order these medicines" sub="Pathya finds a pharmacy near you and asks" onClick={() => setOrdering(true)} />
+        )}
         <Row icon={PhoneOutgoing} title="Reminder calls" disabled={!m.has_phone || remind.isPending || !m.meds.length}
              sub={m.has_phone ? "9 AM, 2 PM, 9 PM, daily for the course" : "No phone in household.yaml"}
              onClick={() => remind.mutate(!m.reminders)}
              right={<span className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">{m.reminders ? "on" : "off"}</span>} />
       </Panel>
       <p className="text-[12px] text-muted-foreground px-1">Pathya reminds and records answers in their words. It never suggests or changes a medicine or dose.</p>
+      {ordering && <PharmacySheet m={m} open={ordering} onClose={() => setOrdering(false)} />}
     </div>
   );
 }

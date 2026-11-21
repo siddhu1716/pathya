@@ -33,7 +33,9 @@ def load_household(path=None):
     path = Path(path or os.getenv("HOUSEHOLD", ROOT / "household.yaml"))
     if not path.exists():
         raise RuntimeError(f"{path} not found. Copy household.example.yaml to household.yaml and fill it in.")
-    return yaml.safe_load(path.read_text(encoding="utf-8"))
+    hh = yaml.safe_load(path.read_text(encoding="utf-8"))
+    hh["pharmacies"] = hh.get("pharmacies") or {}         # added in the app after a tap (health/pharmacy.py)
+    return hh
 
 
 def twilio_ready():
@@ -44,18 +46,10 @@ def twilio_ready():
             and "." in os.getenv("PUBLIC_HOST", "") and "xxxx" not in os.getenv("PUBLIC_HOST", ""))
 
 
-REFUSED_FOR = 24 * 3600
-
-
-def phone_refused(store, now=None):
-    """The user's own phone refused a call recently (Jio rejects Twilio's US number): ring them in the app instead."""
-    f = next((x["value"] for x in store.facts("me", "phone_refused") if x["key"] == "phone_refused"), None)
-    return bool(f) and (now or time.time()) - f.get("ts", 0) < REFUSED_FOR
-
-
 def make_dialer(store, twilio_client=None):
     """Real phone calls with a Twilio client (CALL_MODE=twilio and valid settings); otherwise calls ring in the browser.
-    A job with payload via=browser always rings in the browser (the UI's "Ring: this browser")."""
+    A job with payload via=browser always rings in the browser (the UI's "Ring: this browser"). Pathya's own calls
+    always go out on Twilio; only if the phone network refuses one does it ring in the app instead (call_status)."""
     if twilio_client is None and os.getenv("CALL_MODE") == "twilio":
         store.log("caller", "setup", "CALL_MODE=twilio but the Twilio settings in .env are incomplete; using browser calls")
 
@@ -70,7 +64,7 @@ def make_dialer(store, twilio_client=None):
 
     def dial(to, job_id):
         job = store.job(job_id)
-        if job and (job["payload"].get("via") == "browser" or (job["person"] == "me" and phone_refused(store))):
+        if job and job["payload"].get("via") == "browser":
             return ring_in_browser(to, job_id)
         return phone(to, job_id)
     return dial
@@ -157,8 +151,84 @@ def state(request: Request):
 def _who(hh, key):
     if key == "me":
         return hh["user"]["name"]
-    p = hh["people"].get(key) or hh["clinics"].get(key) or {}
+    p = hh["people"].get(key) or hh["clinics"].get(key) or (hh.get("pharmacies") or {}).get(key) or {}
     return p.get("name") or p.get("clinic") or ("Unknown caller" if key == "caller" else key)
+
+
+# ---------- phone sign-in (app/core/auth.py) ----------
+OPEN_PATHS = {"/api/auth/status", "/api/auth/start", "/api/auth/check"}
+CODE_EVERY = 30                                   # seconds between codes to one number
+
+
+class SignIn(BaseModel):
+    phone: str
+    code: str = ""
+
+
+@api.get("/auth/status")
+def auth_status(request: Request):
+    """Open: whether this server can text sign-in codes (Twilio on) and whether a key or sign-in is needed."""
+    return {"phone_sign_in": _st(request).twilio is not None, "needed": bool(os.getenv("APP_KEY"))}
+
+
+@api.post("/auth/start")
+def auth_start(body: SignIn, request: Request):
+    from app.core import auth
+    st = _st(request)
+    if st.twilio is None:
+        raise HTTPException(503, "Phone sign-in needs Twilio (CALL_MODE=twilio). Use your Pathya link instead.")
+    found = auth.who_has(st.household, body.phone)
+    if not found:
+        raise HTTPException(403, "That number is not in your family's list. Ask whoever runs Pathya to add it "
+                                 "(Family > person > Phone).")
+    number, now = auth.normalize(body.phone), time.time()
+    sent = st.sign_in_sent
+    if now - sent.get(number, 0) < CODE_EVERY:
+        raise HTTPException(429, f"A code was just sent. Wait {int(CODE_EVERY - (now - sent[number])) + 1} seconds.")
+    try:
+        auth.send_code(st.twilio, st.store, number)
+    except Exception as err:
+        msg = str(err)
+        raise HTTPException(502, "Twilio's trial only texts verified numbers: verify this number in Family > Phone > "
+                                 "Verify first." if "unverified" in msg.lower() else f"Could not send the code: {msg[:200]}")
+    sent[number] = now
+    st.store.log("auth", found[0], f"sign-in code sent to …{_digits(number)[-4:]}")
+    return {"sent": True, "to": f"…{_digits(number)[-4:]}"}
+
+
+@api.post("/auth/check")
+def auth_check(body: SignIn, request: Request):
+    from app.core import auth
+    st = _st(request)
+    found = auth.who_has(st.household, body.phone)
+    if st.twilio is None or not found:
+        raise HTTPException(403, "That number can't sign in here.")
+    try:
+        ok = auth.code_ok(st.twilio, st.store, body.phone, body.code)
+    except Exception as err:
+        raise HTTPException(502, f"Could not check the code: {str(err)[:200]}")
+    if not ok:
+        raise HTTPException(401, "That code is not right, or it expired. Ask for a new one.")
+    token = auth.start_session(st.store, found[0], found[1], body.phone)
+    st.store.log("auth", found[0], f"{found[1]} signed in with …{_digits(body.phone)[-4:]}")
+    return {"token": token, "who": found[0], "name": found[1]}
+
+
+@api.get("/auth/me")
+def auth_me(request: Request):
+    from app.core import auth
+    given = request.headers.get("x-quickpick-key") or request.query_params.get("key") or ""
+    s = auth.session(_st(request).store, given)
+    if s:
+        return {"via": "phone", **s}
+    return {"via": "link" if os.getenv("APP_KEY") else "open", "who": "me", "name": _st(request).household["user"]["name"]}
+
+
+@api.post("/auth/signout")
+def auth_signout(request: Request):
+    from app.core import auth
+    auth.end_session(_st(request).store, request.headers.get("x-quickpick-key") or "")
+    return {"ok": True}
 
 
 @api.get("/setup/forwarding")
@@ -506,6 +576,33 @@ async def log_meal(body: Meal, request: Request):
         raise HTTPException(502, f"Could not estimate that meal: {err}")
 
 
+class MealSlot(BaseModel):
+    who: str = "me"
+    id: str
+    meal: str
+
+
+@api.put("/kitchen/meal")
+def meal_slot(body: MealSlot, request: Request):
+    """Change which meal a logged entry was (breakfast, lunch, snack or dinner)."""
+    from app.experts.kitchen import pantry
+    _member(request, body.who)
+    entry = pantry.set_meal(_st(request).store, body.who, body.id, body.meal)
+    if not entry:
+        raise HTTPException(404 if body.meal in pantry.MEALS else 400, "No such meal, or not breakfast, lunch, snack or dinner.")
+    return entry
+
+
+@api.get("/photos/{pid}")
+def photo(pid: str):
+    """A scanned photo (key-protected like the rest of /api; <img> tags pass the key as ?key=)."""
+    from app.core import photos
+    found = photos.find(pid)
+    if not found:
+        raise HTTPException(404, "No such photo.")
+    return FileResponse(found[0], media_type=found[1], headers={"Cache-Control": "private, max-age=86400"})
+
+
 @api.post("/orders/{oid}/delivered")
 def order_delivered(oid: str, request: Request):
     """The 'Got it' button: delivered now, items on the pantry shelf (if the tracker has not seen it yet)."""
@@ -722,6 +819,35 @@ def family_med_remove(key: str, index: int, request: Request):
     return _family_view(st, _member(request, key))
 
 
+class MedCheck(BaseModel):
+    times: list[str]
+    name: str | None = None
+    dose: str | None = None
+    days: int | None = None
+    food: str | None = None
+
+
+@api.put("/family/{key}/meds/{index}")
+def family_med_check(key: str, index: int, body: MedCheck, request: Request):
+    """'Matches the paper': the family checked a prescription line and set its times; reminders may now include it."""
+    from app.experts.family import meds as M
+    st = _st(request)
+    m = _member(request, key)
+    try:
+        med = M.check(st.store, key, index, body.times, body.name, body.dose, body.days, body.food)
+    except ValueError as err:
+        raise HTTPException(400, str(err))
+    if med is None:
+        raise HTTPException(404, "No such medicine.")
+    st.store.log("family", key, f"{m['name']}: {med['name_as_written']} checked against the paper")
+    phone = _expert(request, "home").phone(key)
+    if phone and M.reminders_on(st.store, key):
+        for slot in body.times:
+            if slot in M.SLOTS:
+                M.schedule_next(st.store, phone, key, slot)
+    return _family_view(st, _member(request, key))
+
+
 class OnOff(BaseModel):
     on: bool
 
@@ -775,10 +901,24 @@ def activity(key: str, body: ActivityIn, request: Request):
     return {"ok": True}
 
 
+def _taken_at(taken, now=None):
+    """When the photo was taken (ms since epoch, from the phone: EXIF or the file's time). Within the last 7 days,
+    else now (so a wrong clock or an old gallery photo never lands on a strange day)."""
+    now = now or time.time()
+    try:
+        ts = float(taken) / 1000
+    except (TypeError, ValueError):
+        return now
+    return ts if now - 7 * 86400 <= ts <= now + 600 else now
+
+
 @api.post("/scan")
-async def scan_photo(request: Request, who: str = Form("me"), hint: str = Form(""), photo: UploadFile = File(...)):
-    """One photo: a meal is logged for that person; a medicine, prescription or body report comes back for a human to
-    confirm (nothing is scheduled or saved from it until they do)."""
+async def scan_photo(request: Request, who: str = Form("me"), hint: str = Form(""), taken: str = Form(""),
+                     photo: UploadFile = File(...)):
+    """One photo: a meal is logged for that person (as breakfast, lunch, snack or dinner from when the photo was taken);
+    a medicine, prescription or body report comes back for a human to confirm (nothing is scheduled or saved from it
+    until they do). The photo is kept so the family can look at it again."""
+    from app.core import photos
     from app.experts.family import meds as M
     from app.experts.family import scan
     from app.experts.kitchen import pantry
@@ -791,17 +931,19 @@ async def scan_photo(request: Request, who: str = Form("me"), hint: str = Form("
         seen = await asyncio.to_thread(scan.look, image, mime, hint[:40])
     except Exception as err:
         raise HTTPException(502, f"Could not read the photo: {err}")
+    pid = photos.save(image, mime) if seen["kind"] != "other" else None
     st.store.log("family", who, f"scanned a photo: {seen['kind']}")
     if seen["kind"] == "meal" and seen.get("meal"):
         meal = seen["meal"]
 
         async def as_seen(text):
             return {k: meal[k] for k in ("kcal", "protein_g", "carbs_g", "fat_g", "fibre_g", "sugar_g")}
-        entry = await pantry.log_meal(st.store, meal["description"][:300], "", who=who, estimate=as_seen)
-        return {"kind": "meal", "entry": entry, "note": seen["note"]}
+        entry = await pantry.log_meal(st.store, meal["description"][:300], "", who=who, estimate=as_seen,
+                                      now=_taken_at(taken), photo=pid)
+        return {"kind": "meal", "entry": entry, "note": seen["note"], "photo": pid}
     if seen["kind"] == "medicine":
         listed = M.listed(st.store, who)
-        return {"kind": "medicine", "medicines": seen["medicines"], "note": seen["note"],
+        return {"kind": "medicine", "medicines": seen["medicines"], "note": seen["note"], "photo": pid,
                 "matches": [listed[i]["name_as_written"] for i in scan.matches(seen["medicines"], listed)],
                 "due": M.today(st.store, who)}
     if seen["kind"] == "prescription":
@@ -810,10 +952,11 @@ async def scan_photo(request: Request, who: str = Form("me"), hint: str = Form("
             rx = await asyncio.to_thread(read_prescription, image, mime)
         except Exception as err:
             raise HTTPException(502, f"Could not read the prescription: {err}")
-        card = _expert(request, "health").meds_card(who, rx)
-        return {"kind": "prescription", "card": st.store.add_card(card.to_dict()), "note": seen["note"]}
+        card = _expert(request, "health").meds_card(who, rx, pid)
+        return {"kind": "prescription", "card": st.store.add_card(card.to_dict()), "note": seen["note"], "photo": pid,
+                "count": len(rx.get("meds", []))}
     if seen["kind"] == "body_report" and seen.get("report"):
-        return {"kind": "body_report", "report": seen["report"], "note": seen["note"]}
+        return {"kind": "body_report", "report": seen["report"], "note": seen["note"], "photo": pid}
     return {"kind": "other", "note": seen["note"]}
 
 
@@ -893,14 +1036,60 @@ def health_checkin(person: str, body: Checkin, request: Request):
 
 @api.post("/health/rx")
 async def health_rx(request: Request, patient: str = Form(...), photo: UploadFile = File(...)):
+    from app.core import photos
     from app.experts.health.rx import read_prescription
     _member(request, patient)
+    image, mime = await photo.read(), photo.content_type or "image/jpeg"
     try:
-        rx = await asyncio.to_thread(read_prescription, await photo.read(), photo.content_type or "image/jpeg")
+        rx = await asyncio.to_thread(read_prescription, image, mime)
     except Exception as err:
         raise HTTPException(502, f"Could not read the prescription: {err}")
-    card = _expert(request, "health").meds_card(patient, rx)
+    card = _expert(request, "health").meds_card(patient, rx, photos.save(image, mime))
     return {"card": _st(request).store.add_card(card.to_dict())}
+
+
+class PharmacyFind(BaseModel):
+    who: str = "me"
+    lat: float | None = None
+    lng: float | None = None
+    area: str = ""
+    meds: list[int] | None = None          # indexes into the member's medicines; None = all
+
+
+@api.post("/health/pharmacy")
+async def health_pharmacy(body: PharmacyFind, request: Request):
+    """Pharmacies near the family's location (shared once in the app) for this member's medicines, as a card. Pathya
+    phones one only after a tap, and only asks: it never orders, never accepts a substitute (rule 9)."""
+    from app.experts.family import meds as M
+    from app.experts.health import pharmacy
+    st = _st(request)
+    m = _member(request, body.who)
+    listed = M.listed(st.store, body.who)
+    chosen = [x for i, x in enumerate(listed) if body.meds is None or i in body.meds]
+    if not chosen:
+        raise HTTPException(400, f"{m['name']} has no medicines listed yet. Scan the prescription first.")
+    if (body.lat is None or body.lng is None) and not body.area.strip():
+        raise HTTPException(400, "Share your location, or type the area.")
+    try:
+        found = await asyncio.to_thread(pharmacy.find, body.lat, body.lng, body.area.strip()[:80],
+                                        st.household.get("city", "Hyderabad"))
+    except Exception as err:
+        raise HTTPException(502, f"Could not search for pharmacies: {err}")
+    if not found["pharmacies"]:
+        raise HTTPException(404, f"No pharmacy with a listed phone number found near {found['area']}. Try typing the area.")
+    photo = next((x.get("photo") for x in chosen if x.get("photo")), None)
+    card = _expert(request, "health").pharmacies_card(body.who, found, [M.line(x) for x in chosen], photo)
+    st.store.log("health", body.who, f"found {len(found['pharmacies'])} pharmacies near {found['area']}")
+    return {"card": st.store.add_card(card.to_dict()), "area": found["area"], "count": len(found["pharmacies"])}
+
+
+@api.get("/health/pharmacy/links")
+def health_pharmacy_links(request: Request, who: str = "me"):
+    """Order it yourself: a search link per medicine in Tata 1mg, Apollo 24|7 and PharmEasy (no prices fetched)."""
+    from app.experts.family import meds as M
+    from app.experts.health import pharmacy
+    _member(request, who)
+    return pharmacy.links(M.listed(_st(request).store, who))
 
 
 @api.get("/cards/{aid}")
@@ -1013,7 +1202,7 @@ def _live(request, jid):
 def call_info(jid: str, request: Request):
     job, expert = _call_job(request, jid)
     hh = _st(request).household
-    who = hh["people"].get(job["person"]) or hh["clinics"].get(job["person"]) or {}
+    who = hh["people"].get(job["person"]) or hh["clinics"].get(job["person"]) or (hh.get("pharmacies") or {}).get(job["person"]) or {}
     done = bool(_st(request).store.facts(prefix=f"call:{jid}"))
     return {"id": jid, "kind": job["kind"], "expert": expert.title, "done": done,
             "who": who.get("name") or who.get("clinic") or job["person"], "user": hh["user"]["name"]}
@@ -1179,6 +1368,16 @@ def _person_by_phone(hh, number):
                 None)
 
 
+def _answer_forwarded(st, caller, call_sid):
+    """A call to the user's own phone that their phone forwarded to the Exotel number: the Doorstep Expert answers
+    (it is there for the delivery partner). Someone from household.yaml is greeted by name and leaves a message."""
+    person = _person_by_phone(st.household, caller)
+    name = st.household["people"][person]["name"] if person else None
+    jid = st.experts["doorstep"].answered(call_sid, _digits(caller)[-4:], name)
+    st.store.log("caller", jid, f"forwarded call from {name or 'an unknown number'} (Doorstep)")
+    return jid
+
+
 def _answer_incoming(st, caller, call_sid):
     """Someone phoned Pathya: the user and family members get the Family line (orders, food, medicines), the cook
     the Kitchen list call, anyone else the Doorstep Expert."""
@@ -1238,12 +1437,15 @@ def build_app(lifespan=None) -> FastAPI:
 
     @app.middleware("http")
     async def need_key(request: Request, call_next):
-        """APP_KEY set (phone mode sets it): the app's API needs it, so a public tunnel URL alone is not enough.
-        Twilio and Exotel routes have their own checks (signature, Basic auth)."""
+        """APP_KEY set (phone mode sets it): the app's API needs it, or a phone sign-in session (app/core/auth.py),
+        so a public tunnel URL alone is not enough. Signing in itself is open. Twilio and Exotel routes have their own
+        checks (signature, Basic auth)."""
+        from app.core import auth
         key = os.getenv("APP_KEY", "")
-        if key and request.url.path.startswith("/api/") and request.method != "OPTIONS":
+        path = request.url.path
+        if key and path.startswith("/api/") and request.method != "OPTIONS" and path not in OPEN_PATHS:
             given = request.headers.get("x-quickpick-key") or request.query_params.get("key") or ""
-            if not hmac.compare_digest(given.encode(), key.encode()):
+            if not hmac.compare_digest(given.encode(), key.encode()) and not auth.session(request.app.state.store, given):
                 return JSONResponse({"detail": "Pathya key needed."}, status_code=401)
         return await call_next(request)
 
@@ -1264,11 +1466,10 @@ def build_app(lifespan=None) -> FastAPI:
             return PlainTextResponse("")
         who = _who(st.household, job["person"])
         if status == "failed" and job["person"] == "me" and job["payload"].get("via") != "browser":
-            store.remember("me", "phone_refused", {"ts": time.time(), "number_end": _digits(job["payload"].get("to"))[-4:]}, "twilio")
             again = store.add_job(job["expert"], job["kind"], "me", {**job["payload"], "via": "browser"})
-            _call_problem(store, "Your phone refused the call, so it is ringing in the app",
-                          "Your network (Jio) does not take calls from Twilio's US number. Tap Answer in the app. "
-                          "For real phone calls, put a non-Jio number for yourself in household.yaml.")
+            _call_problem(store, f"Your phone (…{_digits(job['payload'].get('to'))[-4:]}) refused the call, so it is ringing in the app",
+                          "Jio does not take calls from Twilio's US number. Tap Answer in the app this time. For real "
+                          "phone calls, put a non-Jio number (Airtel, Vi, BSNL) in Family > You > Phone.")
             store.log("caller", again, "re-ringing in the app after the phone refused")
             return PlainTextResponse("")
         if status in ("failed", "busy", "no-answer", "canceled"):          # say so in the app, not only in the log
@@ -1314,7 +1515,7 @@ def build_app(lifespan=None) -> FastAPI:
         def call_for_start(msg):
             info = Exotel().start(msg)
             st.store.log("caller", "exotel", f"Exotel call from …{_digits(info['from'])[-4:]}")
-            job_id = _answer_incoming(st, info["from"], info["call"])
+            job_id = _answer_forwarded(st, info["from"], info["call"])
             call = _phone_call_for_start(st, {"event": "start", "start": {"callSid": info["call"],
                                                                          "customParameters": {"job_id": job_id}}}, lines)
             jid["id"] = job_id
@@ -1399,6 +1600,7 @@ def build_app(lifespan=None) -> FastAPI:
     app.state.twilio = None
     app.state.hangups = {}
     app.state.voice_cache = {}
+    app.state.sign_in_sent = {}
     app.state.household_path = None
     return app
 

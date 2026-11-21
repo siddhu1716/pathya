@@ -46,10 +46,38 @@ def remove(store, key, index):
     return True
 
 
+def needs_check(m):
+    """A prescription line the reader was unsure of, or with no time of day: never read out on a reminder call."""
+    return bool(m.get("unclear")) or not any(m.get(s) for s in SLOTS)
+
+
+def check(store, key, index, times, name=None, dose=None, days=None, food=None):
+    """The family compared a line with the paper: its times (and any correction, as written) are now confirmed."""
+    meds = listed(store, key)
+    if not 0 <= index < len(meds):
+        return None
+    times = [t for t in times if t in SLOTS]
+    if not times:
+        raise ValueError("Pick at least one time, as written on the paper.")
+    m = dict(meds[index], unclear=False, checked=time.time(), **{s: s in times for s in SLOTS})
+    if name is not None and str(name).strip():
+        m["name_as_written"] = str(name).strip()[:80]
+    for field, value in (("dose", dose), ("food", food)):
+        if value is not None:
+            m[field] = str(value).strip()[:40] or None
+    if days is not None:
+        m["days"] = int(days) if days else None
+    meds[index] = m
+    store.remember(key, "meds", meds, "checked by family")
+    return m
+
+
 def active(meds, slot, now=None):
-    """Medicines for this time of day whose course (days as written) has not ended."""
+    """Medicines for this time of day whose course (days as written) has not ended. Lines still to be checked against
+    the paper are left out, so a reminder call never reads out a name the reader was unsure of."""
     now = now or time.time()
-    return [m for m in meds if m.get(slot) and not (m.get("days") and now > m["start"] + m["days"] * 86400)]
+    return [m for m in meds if m.get(slot) and not m.get("unclear")
+            and not (m.get("days") and now > m["start"] + m["days"] * 86400)]
 
 
 def line(m):

@@ -170,8 +170,14 @@ def test_exotel_stream_needs_secret_and_routes_caller(env, monkeypatch):
     with client.websocket_connect("/exotel", headers=good) as ws:
         ws.send_text(json.dumps({"event": "start", "stream_sid": "S1",
                                  "start": {"stream_sid": "S1", "call_sid": "X7", "from": "09800000001"}}))
-    assert seen["job"]["expert"] == "home" and seen["job"]["person"] == "amma"        # 0-prefixed Indian number
-    assert store.facts("amma", f"call:{seen['job']['id']}")
+    # A forwarded call is the Doorstep Expert's (delivery partners); family is greeted by name (0-prefixed number)
+    assert seen["job"]["expert"] == "doorstep" and seen["job"]["payload"]["known"] == "Amma"
+    assert "This caller is Amma" in client.app.state.experts["doorstep"].call_plan(seen["job"]).instructions
+    assert store.facts("caller", f"call:{seen['job']['id']}")
+    with client.websocket_connect("/exotel", headers=good) as ws:
+        ws.send_text(json.dumps({"event": "start", "stream_sid": "S2",
+                                 "start": {"stream_sid": "S2", "call_sid": "X8", "from": "09123456789"}}))
+    assert seen["job"]["expert"] == "doorstep" and "known" not in seen["job"]["payload"]
 
 
 def test_kitchen_503_when_swiggy_not_connected(env):

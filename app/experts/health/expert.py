@@ -90,6 +90,11 @@ def wa_link(phone, text):
     return f"https://wa.me/{''.join(c for c in str(phone) if c.isdigit())}?text={urllib.parse.quote(text)}"
 
 
+def e164_or(number, fallback):
+    from app.experts.health.finder import e164
+    return e164(number) or fallback
+
+
 def next_at(hour, now=None):
     now = (now or datetime.now(IST)).astimezone(IST)
     t = now.replace(hour=hour, minute=0, second=0, microsecond=0)
@@ -100,7 +105,7 @@ class HealthExpert(Expert):
     name, title = "health", "Health Expert"
     handles = ("doctor appointments, clinic bookings, check-in calls, questions for the doctor, "
                "prescriptions, medicine reminders, follow-ups")
-    call_kinds = {"book", "checkin", "intake"}
+    call_kinds = {"book", "checkin", "intake", "pharmacy"}
 
     def __init__(self, store, household, path=None):
         self.store, self.hh, self.path = store, household, path      # path: household.yaml, for clinics a human adds
@@ -195,6 +200,8 @@ class HealthExpert(Expert):
     def call_plan(self, job):
         if job["kind"] == "intake":
             return self._intake_plan(job)
+        if job["kind"] == "pharmacy":
+            return self._pharmacy_plan(job)
         p = job["payload"]
         pat, user = self.person(p["patient"]), self.hh["user"]
         if job["kind"] == "book":
@@ -282,6 +289,8 @@ class HealthExpert(Expert):
         p = job["payload"]
         if job["kind"] == "intake":
             return self.request_card(saved["request"]) if saved.get("request") else None
+        if job["kind"] == "pharmacy":
+            return self._pharmacy_answer_card(job, saved)
         if job["kind"] == "book":
             if saved.get("booked"):
                 return self._booked_card(p, saved["booked"])
@@ -338,8 +347,9 @@ class HealthExpert(Expert):
                     payload={"text": verdict.text, "safety": verdict.status,
                              "wa": wa_link(phone, verdict.text) if phone else None})
 
-    def meds_card(self, patient, rx):
-        """rx is the prescription reader's output. Nothing is scheduled until a human confirms."""
+    def meds_card(self, patient, rx, photo=None):
+        """rx is the prescription reader's output. Nothing is scheduled until a human confirms. photo: the stored
+        photo (app/core/photos.py), shown on the card so the family can compare it with what was read."""
         lines, warnings = [], []
         for m in rx.get("meds", []):
             when = "/".join(k for k in DOSE_HOURS if m.get(k)) or "timing unclear"
@@ -352,7 +362,7 @@ class HealthExpert(Expert):
         return Card(self.name, "meds", "Prescription" + (f" - {rx['doctor']}" if rx.get("doctor") else ""), lines,
                     question="Does this match the paper exactly? Reminders start only after you confirm.",
                     choices=[{"id": "confirm", "label": "Matches - set reminders"}, {"id": "discard", "label": "Discard"}],
-                    warnings=warnings, payload={"patient": patient, "rx": rx})
+                    warnings=warnings, payload={"patient": patient, "rx": rx, **({"photo": photo} if photo else {})})
 
     async def run_task(self, job):
         if job["kind"] == "followup":
@@ -412,7 +422,7 @@ class HealthExpert(Expert):
             return {"ok": True, "jobs": [self.book(r["patient"], r["clinic"], slot.isoformat(),
                                                    (slot + timedelta(minutes=1)).isoformat(), None, r["reason"])]}
         if kind == "meds" and choice == "confirm":
-            return self._start_reminders(p["patient"], p["rx"])
+            return self._start_reminders(p["patient"], p["rx"], p.get("photo"))
         if kind == "followup" and choice == "book":
             start = next_at(7)
             return {"ok": True, "jobs": [self.book(p["patient"], self.person(p["patient"]).get("clinic") or next(iter(self.hh["clinics"])),
@@ -420,14 +430,103 @@ class HealthExpert(Expert):
                                                    "morning", f"Review visit with {p.get('doctor') or 'the doctor'}")]}
         if kind == "brief" and choice == "share":
             return {"ok": True, "open": p.get("wa")}
+        if kind == "pharmacies" and choice.startswith("call:"):
+            from app.experts.health import pharmacy
+            try:
+                found = p["found"][int(choice[5:])]
+            except (ValueError, IndexError):
+                return {"ok": False, "error": "No such pharmacy on this card."}
+            key = pharmacy.add_to_household(self.path, self.hh, found)
+            return {"ok": True, "message": f"Added {found['name']} to your pharmacies (household.yaml). Calling them now.",
+                    "jobs": [self.call_pharmacy(p["patient"], key, p["meds"], p.get("photo"))]}
+        if kind == "pharmacy_answer" and choice == "whatsapp":
+            return {"ok": True, "open": p.get("wa")}
         return {"ok": True}
 
-    def _start_reminders(self, patient, rx):
+    # ---- medicines from a pharmacy (app/experts/health/pharmacy.py) ----
+    def address(self):
+        """Where medicines go: the last order's delivery address, else household.yaml's address."""
+        last = next(iter(self.store.orders(limit=1)), None)
+        return (last or {}).get("address") or self.hh.get("address") or self.hh.get("address_hint") or \
+            "the family's address (they will share it on WhatsApp)"
+
+    def pharmacies_card(self, patient, found, meds, photo=None):
+        """Pharmacies near the family, found on the web with their source. Pathya phones one only after a tap."""
+        name = self.person(patient).get("name", patient)
+        rows = found["pharmacies"]
+        lines = [f"{i + 1}. {f['name']}" + (f", {f['address']}" if f.get("address") else "")
+                 + (" · delivers" if f.get("delivers") else "") + f"\n   {f.get('phone')} · source: {f.get('source') or 'web'}"
+                 for i, f in enumerate(rows)]
+        return Card(self.name, "pharmacies", f"Pharmacies near {found['area']}"[:80],
+                    lines + [f"Medicines for {name}, as written: " + "; ".join(meds)],
+                    question="Pathya can phone one to ask if they have these, the total and home delivery. "
+                             "It does not order; you confirm on WhatsApp.",
+                    choices=[{"id": f"call:{i}", "label": f"Phone {f['name'][:28]}"} for i, f in enumerate(rows)],
+                    payload={"patient": patient, "found": rows, "meds": meds, **({"photo": photo} if photo else {})})
+
+    def call_pharmacy(self, patient, key, meds, photo=None, via=None):
+        to = self.hh["pharmacies"][key]["phone"]
+        return self.store.add_job(self.name, "pharmacy", key, {"patient": patient, "pharmacy": key, "meds": meds, "to": to,
+                                                               **({"photo": photo} if photo else {}),
+                                                               **({"via": via} if via else {})})
+
+    def _pharmacy_plan(self, job):
+        from app.experts.health import pharmacy
+        p, user = job["payload"], self.hh["user"]["name"]
+        ph = self.hh["pharmacies"][p["pharmacy"]]
+        language = lang.default(self.hh)
+        greeting = lang.greet(language, "calling", user, ph["name"])
+        plan = CallPlan(pharmacy.PHARMACY_CALL.format(
+            pharmacy=ph["name"], user=user, patient=self.person(p["patient"]).get("name", p["patient"]), greeting=greeting,
+            speak=lang.speak(language), meds="; ".join(p["meds"]), address=self.address(), no_advice=NO_ADVICE),
+            greeting, max_minutes=5, language=language)
+        s = plan.saved
+
+        def save_answer(in_stock: list[str], not_in_stock: list[str], substitutes_offered: list[str], total_price: str,
+                        delivers: bool, delivery_time: str, whatsapp_number: str, notes: str) -> str:
+            """What the pharmacy said, in their words: medicines they have and don't, any substitute they offered (never
+            accepted), the total, home delivery and when, and the WhatsApp number for the prescription photo."""
+            s["answer"] = {"in_stock": in_stock, "not_in_stock": not_in_stock, "substitutes_offered": substitutes_offered,
+                           "total_price": total_price, "delivers": delivers, "delivery_time": delivery_time,
+                           "whatsapp": whatsapp_number, "notes": notes}
+            return "Saved. Say the family will send the prescription on WhatsApp, thank them and end the call."
+
+        plan.tools = [save_answer, convo.end_call_tool(s)]
+        return plan
+
+    def _pharmacy_answer_card(self, job, saved):
+        from app.experts.health import pharmacy
+        p, user = job["payload"], self.hh["user"]["name"]
+        ph = self.hh["pharmacies"][p["pharmacy"]]
+        a = saved.get("answer")
+        if not a:
+            return Card(self.name, "info", f"{ph['name']}: no answer saved",
+                        [saved.get("summary") or "The call ended before they answered."], question="",
+                        choices=[{"id": "ok", "label": "OK"}])
+        to = e164_or(a.get("whatsapp"), ph["phone"])
+        text = pharmacy.order_text(user, self.person(p["patient"]).get("name", p["patient"]), p["meds"], self.address())
+        lines = [f"Have: {', '.join(a['in_stock']) or 'none said'}"]
+        if a.get("not_in_stock"):
+            lines.append(f"Don't have: {', '.join(a['not_in_stock'])}")
+        if a.get("substitutes_offered"):
+            lines.append(f"They offered instead (not accepted; ask the doctor): {', '.join(a['substitutes_offered'])}")
+        lines += [f"Total: {a.get('total_price') or 'not said'}",
+                  f"Delivery: {(a.get('delivery_time') or 'yes') if a.get('delivers') else 'no home delivery'}",
+                  f"WhatsApp: {a.get('whatsapp') or ph['phone']}"] + ([f"Notes: {a['notes']}"] if a.get("notes") else [])
+        return Card(self.name, "pharmacy_answer", f"{ph['name']}: {len(a['in_stock'])} of {len(p['meds'])} available"[:80],
+                    lines, question="To order, send them the prescription photo and the list on WhatsApp.",
+                    choices=[{"id": "whatsapp", "label": "Open WhatsApp with the list"}, {"id": "ok", "label": "Done"}],
+                    payload={"wa": wa_link(to, text), "photo": p.get("photo"), "share_text": text})
+
+    def _start_reminders(self, patient, rx, photo=None):
         """Confirmed prescription: medicines kept as written (same names replace older entries) and daily reminder
         calls at the dose times for the course length (family/meds.py)."""
         from app.experts.family import meds as M
         source = f"prescription {rx.get('doctor') or ''} {rx.get('date') or ''}".strip()
-        new = [dict(m, start=time.time(), source=source) for m in rx.get("meds", []) if not m.get("unclear")]
+        # Every line is kept as written. Unclear lines and lines without a time are flagged and left out of reminder
+        # calls (meds.active) until the family checks them against the paper and sets the times.
+        new = [dict(m, start=time.time(), source=source, **({"photo": photo} if photo else {}))
+               for m in rx.get("meds", []) if str(m.get("name_as_written") or "").strip()]
         names = {m.get("name_as_written") for m in new}
         keep = [m for m in M.listed(self.store, patient) if m.get("name_as_written") not in names]
         self.store.remember(patient, "meds", keep + new, source)
@@ -439,4 +538,11 @@ class HealthExpert(Expert):
             jobs.append(self.store.add_job(self.name, "followup", patient,
                                            {"patient": patient, "doctor": rx.get("doctor"),
                                             "after_days": rx["review_after_days"]}, due))
-        return {"ok": True, "jobs": jobs}
+        name = "your" if patient == "me" else f"{self.person(patient).get('name', patient)}'s"
+        check = [m for m in new if M.needs_check(m)]
+        msg = f"Saved {len(new)} medicine(s) to {name} list, exactly as written."
+        if check:
+            msg += (f" {len(check)} need a check before reminder calls include them: open Family > "
+                    f"{'You' if patient == 'me' else self.person(patient).get('name', patient)} > Medicines, set the times "
+                    "and tap 'Matches the paper'.")
+        return {"ok": True, "message": msg, "jobs": jobs}

@@ -109,16 +109,36 @@ def today_key(now=None):
     return datetime.fromtimestamp(now or time.time(), IST).strftime("%Y-%m-%d")
 
 
+MEALS = ("breakfast", "lunch", "snack", "dinner")
+
+
 def slot_now(now=None):
+    """The meal for a time of day (IST): breakfast 4-11, lunch 11-16, snack 16-19, dinner 19-4 (late dinners)."""
     h = datetime.fromtimestamp(now or time.time(), IST).hour
-    return "breakfast" if h < 11 else "lunch" if h < 16 else "snack" if h < 19 else "dinner"
+    return "dinner" if h < 4 else "breakfast" if h < 11 else "lunch" if h < 16 else "snack" if h < 19 else "dinner"
 
 
-async def log_meal(store, text, meal="", who="me", estimate=None, now=None):
+async def log_meal(store, text, meal="", who="me", estimate=None, now=None, photo=None):
+    """now: when it was eaten (a photo's time), so the meal and the day follow it."""
     now = now or time.time()
     est = await (estimate or estimate_meal)(text)
-    entry = {"text": text, "meal": meal or slot_now(now), "ts": now, **est}
-    store.remember(who, f"meal:{today_key(now)}:{int(now * 1000)}-{uuid.uuid4().hex[:4]}", entry, "food log")
+    key = f"meal:{today_key(now)}:{int(now * 1000)}-{uuid.uuid4().hex[:4]}"
+    said = str(meal or "").lower()
+    entry = {"text": text, "meal": next((m for m in MEALS if m in said), None) or slot_now(now), "ts": now, "id": key,
+             **est, **({"photo": photo} if photo else {})}
+    store.remember(who, key, entry, "food log")
+    return entry
+
+
+def set_meal(store, who, key, meal):
+    """Change which meal an entry was (the photo's time may not say it all, e.g. a late lunch)."""
+    if meal not in MEALS or not str(key).startswith("meal:"):
+        return None
+    row = next((f for f in store.facts(who, key) if f["key"] == key), None)
+    if not row:
+        return None
+    entry = {**row["value"], "meal": meal}
+    store.remember(who, key, entry, row["source"])
     return entry
 
 

@@ -373,3 +373,43 @@ def test_scan_wearable_dose_and_plan_api(client, monkeypatch):
     assert "Apple Watch" in amma["today"]["targets"]["source"]
     assert any(p["part"] == "movement" and p["percent"] == 100 for p in amma["health"]["parts"])
     assert c.post("/api/kitchen/mealplan/fit", json={"day": 0, "who": "Amma"}).status_code == 409   # no plan yet
+
+
+def test_photo_time_sets_the_meal_photos_are_kept_and_unclear_prescription_lines_wait_for_a_check(client, monkeypatch,
+                                                                                                    tmp_path):
+    from datetime import datetime
+    from app.experts.family import scan
+    from app.experts.health import rx as R
+    c, store = client
+    monkeypatch.setenv("PHOTOS_DIR", str(tmp_path))
+    seen = {"kind": "meal", "note": "a plate", "medicines": [], "report": None,
+            "meal": {"description": "2 idli, sambar", "kcal": 300, "protein_g": 9, "carbs_g": 50, "fat_g": 6,
+                     "fibre_g": 4, "sugar_g": 0}}
+    monkeypatch.setattr(scan, "look", lambda image, mime, hint="": seen)
+    yesterday_8am = datetime.now(M.IST).replace(hour=8, minute=15, second=0, microsecond=0).timestamp() - 86400
+    r = c.post("/api/scan", data={"who": "amma", "taken": str(int(yesterday_8am * 1000))},
+               files={"photo": ("x.jpg", b"jpeg bytes", "image/jpeg")}).json()
+    assert r["entry"]["meal"] == "breakfast" and r["entry"]["ts"] == yesterday_8am and r["entry"]["photo"] == r["photo"]
+    assert r["entry"]["id"].startswith(f"meal:{pantry.today_key(yesterday_8am)}:")     # on the day it was eaten
+    assert c.get(f"/api/photos/{r['photo']}").content == b"jpeg bytes" and c.get("/api/photos/..%2Fx").status_code == 404
+    assert c.put("/api/kitchen/meal", json={"who": "amma", "id": r["entry"]["id"], "meal": "lunch"}).json()["meal"] == "lunch"
+    assert c.put("/api/kitchen/meal", json={"who": "amma", "id": r["entry"]["id"], "meal": "brunch"}).status_code == 400
+    old = c.post("/api/scan", data={"who": "amma", "taken": "1000"}, files={"photo": ("x.jpg", b"j", "image/jpeg")}).json()
+    assert abs(old["entry"]["ts"] - time.time()) < 60                                    # an old photo counts as now
+
+    seen.update(kind="prescription")
+    monkeypatch.setattr(R, "read_prescription", lambda image, mime: {
+        "doctor": "Dr. Rao", "date": None, "review_after_days": None, "unreadable_parts": [], "advice_as_written": [],
+        "meds": [{"name_as_written": "Simvotin 10mg", "strength": None, "dose": "one", "morning": False, "afternoon": False,
+                  "night": False, "food": None, "days": None, "unclear": True}]})
+    r = c.post("/api/scan", data={"who": "amma"}, files={"photo": ("rx.jpg", b"rx", "image/jpeg")}).json()
+    card = store.card(r["card"])
+    assert card["card"]["payload"]["photo"] == r["photo"] and r["count"] == 1
+    out = c.post(f"/api/cards/{r['card']}/tap", json={"choice": "confirm"}).json()["result"]
+    assert "1 need a check" in out["message"]
+    med = c.get("/api/family").json()["members"][1]["meds"][0]
+    assert med["name_as_written"] == "Simvotin 10mg" and med["unclear"] and med["photo"] == r["photo"]   # kept as written
+    assert M.today(store, "amma") == []                                                    # but never read out yet
+    assert c.put("/api/family/amma/meds/0", json={"times": []}).status_code == 400
+    amma = c.put("/api/family/amma/meds/0", json={"times": ["night"]}).json()
+    assert not amma["meds"][0]["unclear"] and amma["doses"][0]["meds"] == ["Simvotin 10mg one"]

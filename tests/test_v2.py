@@ -10,6 +10,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from app.core import caller as C, jobs as J, safety as S
 from app.core.store import Store
 from app.experts.base import Card, register
+from app.experts.family import meds as M
 from app.experts.health.expert import IST, HealthExpert, make_ics
 from app.experts.kitchen import swiggy as sw
 from app.experts.kitchen.expert import KitchenExpert
@@ -124,7 +125,11 @@ out = asyncio.run(h.execute(mc.to_dict(), "confirm"))
 assert [f["value"] for f in st2.facts("amma", "advice:")] == ["Low salt diet"]
 assert sorted(st2.job(j)["kind"] for j in out["jobs"]) == ["followup", "meds"]      # daily reminder + review
 mj = next(st2.job(j) for j in out["jobs"] if st2.job(j)["kind"] == "meds")
-assert mj["expert"] == "home" and mj["payload"]["slot"] == "morning" and [m["name_as_written"] for m in st2.facts("amma", "meds")[0]["value"]] == ["Tab. ABC 40"]   # unclear lines are not scheduled
+assert mj["expert"] == "home" and mj["payload"]["slot"] == "morning"
+saved = st2.facts("amma", "meds")[0]["value"]
+assert [m["name_as_written"] for m in saved] == ["Tab. ABC 40", "Tab. ???"] and saved[1]["unclear"]   # kept as written
+assert [m["name_as_written"] for m in M.active(saved, "morning")] == ["Tab. ABC 40"]      # unclear lines are not scheduled
+assert "1 need a check" in out["message"]
 fj = next(st2.job(j) for j in out["jobs"] if st2.job(j)["kind"] == "followup")
 fc = asyncio.run(h.run_task(fj)); bj = st2.job(asyncio.run(h.execute(fc.to_dict(), "book"))["jobs"][0])
 assert bj["kind"] == "book" and bj["payload"]["part"] == "morning" and bj["payload"]["to"] == "+919800000003"

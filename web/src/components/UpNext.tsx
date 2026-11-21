@@ -7,7 +7,7 @@ import { api, Job, Person } from "@/lib/api";
 
 const KIND: Record<string, string> = {
   list: "Grocery list call", menu: "Menu call", book: "Clinic booking call", checkin: "Check-in call",
-  followup: "Follow-up", home: "Check-in call", doorstep: "Incoming call", meds: "Medicine reminder", intake: "Doctor booking call",
+  followup: "Follow-up", home: "Check-in call", doorstep: "Incoming call", meds: "Medicine reminder", intake: "Doctor booking call", pharmacy: "Pharmacy call",
 };
 
 const when = (ts: number) => new Date(ts * 1000).toLocaleString("en-IN", { weekday: "short", hour: "2-digit", minute: "2-digit" });
