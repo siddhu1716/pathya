@@ -23,10 +23,12 @@ async def connect_openai(model=None):
         yield ws
 
 
-async def phone_bridge(twilio, call_for_start, finish, hang_up, log, connect=connect_openai, fallback_s=15):
+async def phone_bridge(twilio, call_for_start, finish, hang_up, log, connect=connect_openai, fallback_s=15,
+                       transcript=None):
     """twilio: a WebSocket with receive_text/send_text. call_for_start(start_msg) -> Call (raises if the
     stream is not one of our dialled calls). finish(call, transcript) runs once when the stream ends.
-    hang_up(call_sid) ends the phone call. log(what) writes to the timeline."""
+    hang_up(call_sid) ends the phone call. log(what) writes to the timeline. transcript: an optional list
+    the caller owns, filled live (the UI shows it during the call)."""
     start = None
     while start is None:
         msg = json.loads(await twilio.receive_text())
@@ -36,7 +38,8 @@ async def phone_bridge(twilio, call_for_start, finish, hang_up, log, connect=con
             return
     call = call_for_start(start)
     stream_sid, call_sid = start["start"]["streamSid"], start["start"]["callSid"]
-    transcript, state = [], {"ending": False, "hung_up": False}
+    transcript = transcript if transcript is not None else []
+    state = {"ending": False, "hung_up": False}
     timers = []
 
     async def end_phone_call(delay=0):

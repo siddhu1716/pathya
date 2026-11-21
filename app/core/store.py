@@ -13,6 +13,8 @@ CREATE TABLE IF NOT EXISTS jobs(id TEXT PRIMARY KEY, expert TEXT, kind TEXT, per
 CREATE TABLE IF NOT EXISTS facts(person TEXT, key TEXT, value TEXT, source TEXT, updated REAL,
     PRIMARY KEY (person, key));
 CREATE TABLE IF NOT EXISTS events(ts REAL, expert TEXT, ref TEXT, what TEXT);
+CREATE TABLE IF NOT EXISTS orders(id TEXT PRIMARY KEY, store TEXT, card TEXT, ref TEXT, items TEXT, total TEXT,
+    address TEXT, address_id TEXT, status TEXT, eta TEXT, detail TEXT, placed REAL, updated REAL, delivered REAL);
 """
 
 
@@ -130,6 +132,36 @@ class Store:
         rows = self.db.execute("SELECT id FROM jobs WHERE status!='scheduled' AND run_at>=? ORDER BY run_at DESC",
                                (since,)).fetchall()
         return [self.job(r["id"]) for r in rows]
+
+    # ---- orders: what was actually placed, and where it is now ----
+    def add_order(self, oid, store, card, ref, items, total, address, address_id, status="placed", eta=None):
+        now = time.time()
+        self.db.execute("INSERT OR IGNORE INTO orders VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                        (str(oid), store, card, ref, json.dumps(items), total, address, address_id, status, eta,
+                         None, now, now, None))
+        self.log("orders", str(oid), f"{store} order placed ({total})")
+
+    def update_order(self, oid, status=None, eta=None, detail=None, delivered=False):
+        """Returns True when the status changed (the tracker logs it on the timeline)."""
+        old = self.order(oid)
+        if not old:
+            return False
+        self.db.execute("UPDATE orders SET status=COALESCE(?, status), eta=COALESCE(?, eta), "
+                        "detail=COALESCE(?, detail), updated=?, delivered=COALESCE(delivered, ?) WHERE id=?",
+                        (status, eta, json.dumps(detail, default=str) if detail is not None else None, time.time(),
+                         time.time() if delivered else None, str(oid)))
+        return bool(status) and status != old["status"]
+
+    def order(self, oid):
+        r = self.db.execute("SELECT * FROM orders WHERE id=?", (str(oid),)).fetchone()
+        if not r:
+            return None
+        return dict(r, items=json.loads(r["items"] or "[]"), detail=json.loads(r["detail"]) if r["detail"] else None)
+
+    def orders(self, active=False, limit=20):
+        q = "SELECT id FROM orders" + (" WHERE delivered IS NULL AND store != 'dry run'" if active else "")
+        rows = self.db.execute(q + " ORDER BY placed DESC LIMIT ?", (limit,)).fetchall()
+        return [self.order(r["id"]) for r in rows]
 
     # ---- facts: household memory shared by all Experts ----
     def remember(self, person, key, value, source):

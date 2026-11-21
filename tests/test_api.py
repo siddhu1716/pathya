@@ -49,14 +49,21 @@ class FakeKitchen(Expert):
     def weekly_call(self, person):
         return self.store.add_job(self.name, "list", person, {"person": person, "to": "+919800000002"})
 
+    def answered(self, person, call_sid):
+        jid = self.store.add_job(self.name, "list", person, {"person": person, "direction": "inbound"}, 4102444800)
+        self.store.start_job(jid)
+        self.store.end_job(jid, True, {"call_sid": call_sid})
+        return jid
+
 
 @pytest.fixture
 def env():
+    from app.experts.doorstep.expert import DoorstepExpert
     store = Store(":memory:")
     app = build_app()
     kitchen = FakeKitchen(store)
     app.state.store, app.state.household = store, HH
-    app.state.experts = {"kitchen": kitchen, "health": HealthExpert(store, HH)}
+    app.state.experts = {"kitchen": kitchen, "health": HealthExpert(store, HH), "doorstep": DoorstepExpert(store, HH)}
     with TestClient(app) as client:
         yield client, store, kitchen
 
@@ -192,3 +199,94 @@ def test_browser_call_runs_expert_tools_and_makes_card(env, monkeypatch):
     assert any(c["card"]["kind"] == "booking" for c in store.cards())
     assert store.facts("rao", f"call:{jid}")[0]["value"]["transcript"][0]["text"] == "hi"
     assert client.post(f"/api/calls/{jid}/sdp", content="v=0 offer").status_code == 409     # one answer per call
+
+
+def test_tap_records_orders_and_tracker_logs_changes(env):
+    import asyncio
+    from app.core import tracker
+    client, store, _ = env
+    aid = client.post("/api/kitchen/plan", json={"text": "2 milk"}).json()["card"]
+    client.post(f"/api/cards/{aid}/tap", json={"choice": "COD"})
+    assert client.get("/api/orders").json() == []                       # the fake order came back without an id
+    tracker.record(store, "c1", {"lines": ["Milk x2"], "total": "₹99", "address": "Loft",
+                                 "payload": {"address_id": "a1"}}, {"order": {"orderId": "O1"}, "eta": {"O1": "12 mins"}})
+    tracker.record(store, "c2", {"lines": [], "payload": {}}, {"dry_run": True})
+    assert [o["id"] for o in store.orders(active=True)] == ["O1"]       # dry runs are never tracked
+
+    class K:
+        def __init__(self, answers): self.answers = answers
+        async def track(self, o):
+            a = self.answers.pop(0)
+            if isinstance(a, Exception):
+                raise a
+            return a
+    changed = asyncio.run(tracker.tick(store, K([("Out for delivery", "5 mins", {}, False)])))
+    assert changed == ["O1"] and store.order("O1")["eta"] == "5 mins"
+    state = {}
+    assert asyncio.run(tracker.tick(store, K([RuntimeError("HTTP 429 Too Many Requests")]), state=state)) == []
+    assert asyncio.run(tracker.tick(store, K([]), state=state)) == []   # paused: no calls at all
+    asyncio.run(tracker.tick(store, K([("Delivered", None, {}, True)]), now=state["paused_until"] + 1))
+    assert store.orders(active=True) == [] and any("Delivered" in e["what"] for e in store.timeline(ref="O1"))
+    assert client.get("/api/state").json()["orders"][0]["id"] in ("O1", "dry-c2")
+
+
+def test_incoming_calls_route_by_caller_and_need_twilio_signature(env, monkeypatch):
+    from twilio.request_validator import RequestValidator
+    client, store, _ = env
+    monkeypatch.setenv("PUBLIC_HOST", "abc.trycloudflare.com")
+    monkeypatch.setenv("TWILIO_AUTH_TOKEN", "t" * 32)
+    client.app.state.twilio = object()
+    url = "https://abc.trycloudflare.com/calls/incoming"
+
+    def ring(frm, sid, signed=True):
+        form = {"From": frm, "CallSid": sid, "To": "+16180000000"}
+        sig = RequestValidator("t" * 32).compute_signature(url, form) if signed else "bad"
+        return client.post("/calls/incoming", data=form, headers={"X-Twilio-Signature": sig})
+
+    assert ring("+919800000001", "CA1", signed=False).status_code == 403
+    r = ring("+91 98000 00001", "CA1")                                  # Amma, formatted differently
+    assert r.status_code == 200 and "<Stream" in r.text
+    amma = [j for j in store.recent_jobs(0) if j["result"] == {"call_sid": "CA1"}][0]
+    assert amma["expert"] == "kitchen" and amma["person"] == "amma" and amma["payload"]["direction"] == "inbound"
+    ring("+918888812345", "CA2")                                        # unknown: the delivery partner
+    door = [j for j in store.recent_jobs(0) if j["result"] == {"call_sid": "CA2"}][0]
+    assert door["expert"] == "doorstep" and door["payload"]["caller"] == "…2345"
+    assert store.upcoming() == []                                       # answered calls are never dialled
+
+
+def test_doorstep_guides_without_ids_or_otp(env):
+    import asyncio
+    client, store, _ = env
+    d = client.app.state.experts["doorstep"]
+    store.add_order("254220219978762", "swiggy", "c1", None, ["Milk x2", "Curd x1"], "₹149", "Loft", "a1", "Out for delivery", "5 mins")
+    plan = d.call_plan(store.job(d.answered("CA9", "1234")))
+    assert plan.greeting.startswith("Hello, I am QuickPick, an AI assistant")
+    assert "254220219978762" not in plan.instructions and "2 item(s)" in plan.instructions
+    assert "Never share an OTP" in plan.instructions
+    tools = {f.__name__: f for f in plan.tools}
+    tools["notify_owner"]("Partner is at the security desk")
+    assert store.cards()[0]["card"]["kind"] == "alert"
+    tools["end_call"]("Guided the partner to the 3rd floor")
+    assert asyncio.run(d.after_call(store.job(d.answered("CA10", "1234")), plan.saved)).lines[0].startswith("Guided")
+
+
+def test_live_transcript_and_call_history(env, monkeypatch):
+    import app.core.browser_call as bc
+    client, store, kitchen = env
+
+    async def fake_answer(offer, config, **kw):
+        return "v=0 answer"
+    monkeypatch.setattr(bc, "answer_sdp", fake_answer)
+    jid = kitchen.weekly_call("lakshmi")
+    store.start_job(jid)
+    store.end_job(jid, True, {"call_sid": "browser"})
+    from app.experts.kitchen.expert import KitchenExpert
+    client.app.state.experts["kitchen"] = KitchenExpert(store, HH, None, object())
+    client.post(f"/api/calls/{jid}/sdp", content="v=0 offer")
+    client.post(f"/api/calls/{jid}/line", json={"role": "them", "text": "rendu litres paalu"})
+    live = client.get("/api/state").json()["live"]
+    assert live[0]["who"] == "Lakshmi garu" and live[0]["lines"][-1]["text"] == "rendu litres paalu"
+    client.post(f"/api/calls/{jid}/end", json={"transcript": [{"role": "them", "text": "rendu litres paalu"}]})
+    assert client.get("/api/state").json()["live"] == []
+    hist = client.get("/api/calls").json()
+    assert hist[0]["who"] == "Lakshmi garu" and hist[0]["transcript"][0]["text"] == "rendu litres paalu"

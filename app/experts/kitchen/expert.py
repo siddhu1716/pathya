@@ -2,12 +2,13 @@
 -> one human tap -> order. Items Instamart can't supply get a separate Zepto card (availability, not price).
 Ordering rules live in swiggy.py and zepto.py (tested); this file wires them in."""
 import os
+import time
 
 from app.experts.base import CallPlan, Card, Expert
 from app.experts.kitchen import swiggy as sw
 from app.experts.kitchen import zepto as zp
 
-LIST_CALL = """You are QuickPick, an AI assistant, calling {who} for {user}'s family to take this week's grocery list.
+LIST_CALL = """You are QuickPick, an AI assistant, talking with {who} for {user}'s family to take this week's grocery list.
 Your first sentence: "{greeting}" After it, speak {lang}, simply and politely (mixing in common English words
 is fine); if they answer in another language, continue in theirs.
 Ask what the kitchen needs this week; ask for quantities when missing.
@@ -42,10 +43,20 @@ class KitchenExpert(Expert):
         p = self.hh["people"][person]
         return self.store.add_job(self.name, "list", person, {"person": person, "to": p["phone"]}, run_at)
 
+    def answered(self, person, call_sid):
+        """A household member phoned QuickPick: a list call that has already 'run' (never dialled)."""
+        jid = self.store.add_job(self.name, "list", person, {"person": person, "direction": "inbound"}, run_at=4102444800)
+        self.store.start_job(jid)
+        self.store.end_job(jid, True, {"call_sid": call_sid})
+        return jid
+
     def call_plan(self, job):
         p, user = self.hh["people"][job["payload"]["person"]], self.hh["user"]["name"]
         usual = [str(f["value"]) for f in self.store.facts(prefix="usual:")][:3]
-        greeting = f"Namaskaram {p['name']}, I am QuickPick, an AI assistant calling for {user} about this week's groceries."
+        if job["payload"].get("direction") == "inbound":
+            greeting = f"Namaskaram {p['name']}, I am QuickPick, an AI assistant answering for {user}. What does the kitchen need?"
+        else:
+            greeting = f"Namaskaram {p['name']}, I am QuickPick, an AI assistant calling for {user} about this week's groceries."
         plan = CallPlan(LIST_CALL.format(who=p["name"], user=user, greeting=greeting,
                                          lang=p.get("language", "Telugu"), usual=", ".join(usual) or "none"),
                         greeting, max_minutes=5)
@@ -166,3 +177,20 @@ class KitchenExpert(Expert):
                 except Exception as err:
                     out[o["orderId"]] = f"ETA unavailable ({err})"
         return out
+
+    async def track(self, o):
+        """One gentle status check for a placed order (the tracker calls this about once a minute).
+        Returns (status, eta, detail, delivered). Unknown response shapes fall back to the store's own text."""
+        if o["store"] == "zepto":
+            d, msg = await sw.call(self.zepto, "get_order_detail", {"orderId": o["id"]})
+        else:
+            d, msg = await sw.call(self.ops, "get_delivery_status", {"orderId": o["id"], "addressId": o["address_id"]})
+        d = d if isinstance(d, dict) else {}
+        status = (d.get("statusText") or d.get("orderStatus") or d.get("status") or for_people(msg).split("\n")[0])[:120]
+        eta = d.get("etaText") or d.get("eta")
+        by = d.get("deliveryBy")
+        if not eta and isinstance(by, (int, float)) and by > 0:
+            mins = round(((by / 1000 if by > 1e11 else by) - time.time()) / 60)
+            eta = f"{mins} mins" if mins > 0 else "any minute"
+        delivered = bool(d.get("isDelivered") or d.get("delivered")) or "delivered" in str(status).lower()
+        return status, eta, d, delivered

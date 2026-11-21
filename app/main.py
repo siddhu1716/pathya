@@ -112,6 +112,9 @@ def state(request: Request):
     return {
         "dry_run": os.getenv("DRY_RUN", "1") == "1",
         "swiggy": getattr(st.experts.get("kitchen"), "ops", None) is not None,
+        "zepto": getattr(st.experts.get("kitchen"), "zepto", None) is not None,
+        "phone": st.twilio is not None,
+        "phone_number": os.getenv("TWILIO_FROM") if st.twilio is not None else None,
         "user": hh["user"]["name"],
         "people": [{"key": k, "name": v["name"], "role": v.get("role", ""), "language": v.get("language", "")}
                    for k, v in hh["people"].items()],
@@ -120,8 +123,36 @@ def state(request: Request):
         "recent": store.recent_cards(),
         "jobs": store.upcoming(),
         "ringing": ringing,
-        "timeline": store.timeline(limit=20),
+        "live": [{"id": jid, **{k: v for k, v in c.items() if k != "lines"}, "lines": c["lines"][-8:]}
+                 for jid, c in st.live.items()],
+        "orders": store.orders(limit=10),
+        "timeline": store.timeline(limit=30),
     }
+
+
+def _who(hh, key):
+    p = hh["people"].get(key) or hh["clinics"].get(key) or {}
+    return p.get("name") or p.get("clinic") or ("Unknown caller" if key == "caller" else key)
+
+
+@api.get("/calls")
+def calls(request: Request):
+    """Finished calls, newest first: who, what for, how long, the transcript and what the Expert saved."""
+    st = _st(request)
+    out = []
+    for f in reversed(st.store.facts(prefix="call:")):
+        jid, job = f["key"][5:], st.store.job(f["key"][5:])
+        v = f["value"] if isinstance(f["value"], dict) else {}
+        out.append({"id": jid, "who": _who(st.household, f["person"]), "kind": (job or {}).get("kind"),
+                    "expert": (job or {}).get("expert"), "direction": (job or {}).get("payload", {}).get("direction", "outbound"),
+                    "source": f["source"], "ended": f["updated"], "seconds": v.get("seconds"),
+                    "transcript": v.get("transcript", []), "saved": v.get("saved", {})})
+    return out[:30]
+
+
+@api.get("/orders")
+def orders(request: Request):
+    return _st(request).store.orders(limit=30)
 
 
 @api.post("/ask")
@@ -205,6 +236,9 @@ async def _settle_upi(st, aid, kitchen, result):
         if ok:
             result["eta"] = await kitchen.etas(result["order"], result.get("address_id", ""))
         st.store.finish(aid, ok, result)
+        if ok:
+            from app.core.tracker import record
+            record(st.store, aid, st.store.card(aid)["card"], result)
     except Exception as err:
         st.store.finish(aid, False, {**result, "ok": False, "error": f"Payment check failed: {err}"})
 
@@ -233,7 +267,11 @@ async def tap(aid: str, body: Tap, request: Request):
         st.tasks.add(t := asyncio.create_task(_settle_upi(st, aid, expert, result)))
         t.add_done_callback(st.tasks.discard)
     else:
-        st.store.finish(aid, bool(result.get("ok", True)), result)
+        ok = bool(result.get("ok", True))
+        st.store.finish(aid, ok, result)
+        if ok and card["kind"] == "order":
+            from app.core.tracker import record
+            record(st.store, aid, card, result)
     return st.store.card(aid)
 
 
@@ -316,8 +354,30 @@ async def call_sdp(jid: str, request: Request):
         st.store.log(expert.name, jid, f"call could not start: {err}")
         raise HTTPException(502, str(err))
     st.calls[jid] = Call(job, expert, plan)
+    _go_live(st, st.calls[jid], [])
     st.store.log(expert.name, jid, f"call answered (browser), limit {plan.max_minutes} min")
     return PlainTextResponse(answer, media_type="application/sdp")
+
+
+def _go_live(st, call, lines):
+    """In-progress calls with their transcript so far (the UI shows them live)."""
+    job = call.job
+    st.live[job["id"]] = {"who": _who(st.household, job["person"]), "kind": job["kind"], "expert": call.expert.title,
+                          "direction": job["payload"].get("direction", "outbound"), "started": call.started,
+                          "lines": lines}
+
+
+class Line(BaseModel):
+    role: str
+    text: str
+
+
+@api.post("/calls/{jid}/line")
+def call_line(jid: str, body: Line, request: Request):
+    live = _st(request).live.get(jid)
+    if live is not None and body.role in ("ai", "them", "tool"):
+        live["lines"].append({"role": body.role, "text": body.text[:500]})
+    return {"ok": True}
 
 
 @api.get("/calls/{jid}/greeting")
@@ -357,6 +417,7 @@ def _finish_call(st, call, jid, transcript, source):
     st.tasks.add(t := asyncio.create_task(_after_call(st, call, jid)))     # e.g. building the cart takes ~30 s
     t.add_done_callback(st.tasks.discard)
     st.calls.pop(jid, None)
+    st.live.pop(jid, None)
 
 
 @api.post("/calls/{jid}/end")
@@ -370,8 +431,8 @@ async def call_end(jid: str, body: CallEnd, request: Request):
     return {"ok": True}
 
 
-def _phone_call_for_start(st, msg):
-    """Only streams for calls we dialled: the job exists, is a call kind, and Twilio's CallSid matches."""
+def _phone_call_for_start(st, msg, lines=None):
+    """Only streams for calls we dialled or answered: the job exists, is a call kind, and Twilio's CallSid matches."""
     from app.core.browser_call import Call
     from app.core.caller import job_id_from_start
     jid = job_id_from_start(msg)
@@ -385,8 +446,15 @@ def _phone_call_for_start(st, msg):
         raise RuntimeError(f"Job {jid} already has a call")
     call = Call(job, expert, expert.call_plan(job))
     st.calls[jid] = call
-    st.store.log(expert.name, jid, f"{job['person']} answered the phone, limit {call.plan.max_minutes} min")
+    _go_live(st, call, lines if lines is not None else [])
+    st.store.log(expert.name, jid, f"{_who(st.household, job['person'])} on the phone, limit {call.plan.max_minutes} min")
     return call
+
+
+def _person_by_phone(hh, number):
+    digits = lambda n: "".join(c for c in str(n or "") if c.isdigit())[-10:]
+    return next((k for k, p in hh["people"].items() if digits(p.get("phone")) and digits(p.get("phone")) == digits(number)),
+                None)
 
 
 # ---------- app ----------
@@ -402,15 +470,38 @@ def build_app(lifespan=None) -> FastAPI:
                                                     f"({form.get('CallDuration', '0')} s)")
         return PlainTextResponse("")
 
+    @app.post("/calls/incoming")
+    async def call_incoming(request: Request):
+        """Twilio voice webhook for the QuickPick number. Household members get the Kitchen list call;
+        anyone else (usually the delivery partner) gets the Doorstep Expert. Only Twilio-signed requests."""
+        from twilio.request_validator import RequestValidator
+        from app.core.caller import stream_twiml
+        st = request.app.state
+        form = dict(await request.form())
+        if st.twilio is None:
+            raise HTTPException(503, "Phone calls are not configured.")
+        url = f"https://{os.environ['PUBLIC_HOST']}/calls/incoming"
+        if not RequestValidator(os.environ["TWILIO_AUTH_TOKEN"]).validate(url, form, request.headers.get("X-Twilio-Signature", "")):
+            raise HTTPException(403, "Not signed by Twilio.")
+        caller, sid = form.get("From", ""), form.get("CallSid", "")
+        person = _person_by_phone(st.household, caller)
+        if person and "kitchen" in st.experts:
+            jid = st.experts["kitchen"].answered(person, sid)
+        else:
+            jid = st.experts["doorstep"].answered(sid, "".join(c for c in caller if c.isdigit())[-4:])
+        st.store.log("caller", jid, f"incoming call from {_who(st.household, person) if person else 'an unknown number'}")
+        return PlainTextResponse(stream_twiml(os.environ["PUBLIC_HOST"], jid), media_type="text/xml")
+
     @app.websocket("/media-stream")
     async def media_stream(ws: WebSocket):
         from app.core.call_session import phone_bridge
         st = ws.app.state
         await ws.accept()
         jid = {}
+        lines = []
 
         def call_for_start(msg):
-            call = _phone_call_for_start(st, msg)
+            call = _phone_call_for_start(st, msg, lines)
             jid["id"] = call.job["id"]
             return call
 
@@ -423,7 +514,7 @@ def build_app(lifespan=None) -> FastAPI:
 
         try:
             await phone_bridge(ws, call_for_start, finish, hang_up,
-                               lambda what: st.store.log("caller", jid.get("id", "stream"), what))
+                               lambda what: st.store.log("caller", jid.get("id", "stream"), what), transcript=lines)
         except Exception as err:
             st.store.log("caller", jid.get("id", "stream"), f"phone stream failed: {err}")
         finally:
@@ -447,6 +538,7 @@ def build_app(lifespan=None) -> FastAPI:
 
     app.state.tasks = set()
     app.state.calls = {}
+    app.state.live = {}
     app.state.twilio = None
     return app
 
@@ -479,6 +571,8 @@ async def lifespan(app: FastAPI):
         REGISTRY.clear()                                    # uvicorn --reload re-runs the lifespan
         register(KitchenExpert(store, hh, agent_im, ops, zepto))
         register(HealthExpert(store, hh))
+        from app.experts.doorstep.expert import DoorstepExpert
+        register(DoorstepExpert(store, hh))
         app.state.store, app.state.household, app.state.experts = store, hh, REGISTRY
         if twilio_ready():
             from twilio.rest import Client
@@ -487,11 +581,14 @@ async def lifespan(app: FastAPI):
                                          f"(stream: wss://{os.environ['PUBLIC_HOST']}/media-stream)")
         dispatch = J.make_dispatch(store, REGISTRY, make_dialer(store, app.state.twilio))
         scheduler = asyncio.create_task(J.run_forever(store, dispatch, every=5))
+        from app.core import tracker
+        tracking = asyncio.create_task(tracker.run_forever(store, REGISTRY["kitchen"], every=60))
         store.log("app", "start", f"QuickPick started (DRY_RUN={os.getenv('DRY_RUN', '1')})")
         try:
             yield
         finally:
             scheduler.cancel()
+            tracking.cancel()
             for t in list(app.state.tasks):
                 t.cancel()
 

@@ -28,6 +28,19 @@ def set_env(updates):
     ENV.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def point_number_here(host):
+    """Incoming calls to the Twilio number -> https://<host>/calls/incoming."""
+    from dotenv import dotenv_values
+    from twilio.rest import Client
+    env = dotenv_values(ENV)
+    client = Client(env["TWILIO_ACCOUNT_SID"], env["TWILIO_AUTH_TOKEN"])
+    numbers = client.incoming_phone_numbers.list(phone_number=env["TWILIO_FROM"].split("#")[0].strip(), limit=1)
+    if not numbers:
+        return print(f"Twilio number {env['TWILIO_FROM']} not found on this account; incoming calls not set up.")
+    numbers[0].update(voice_url=f"https://{host}/calls/incoming", voice_method="POST")
+    print(f"Incoming calls to {env['TWILIO_FROM']} now reach QuickPick.")
+
+
 def main(port="8000"):
     exe = next((c for c in CANDIDATES if c and os.path.exists(c)), None)
     if not exe:
@@ -43,6 +56,10 @@ def main(port="8000"):
                 set_env({"PUBLIC_HOST": m.group(1), "CALL_MODE": "twilio"})
                 print(f"Tunnel: https://{m.group(1)}  ->  localhost:{port}", flush=True)
                 print("Wrote PUBLIC_HOST and CALL_MODE=twilio to .env.")
+                try:
+                    point_number_here(m.group(1))
+                except Exception as err:
+                    print(f"Could not set the incoming-call webhook: {err}")
                 print(f"Now (re)start the app: uvicorn app.main:app --port {port}")
                 print("Ctrl+C here closes the tunnel and switches back to browser calls.", flush=True)
         proc.wait()

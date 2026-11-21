@@ -20,3 +20,8 @@ clinics:
     clinic: "Sunrise Clinic, Gachibowli (placeholder)"
     phone: "+91XXXXXXXXXX"
 address_hint: Loft
+# What the Doorstep Expert tells a delivery partner who calls (never OTPs, payment or IDs).
+delivery_instructions: >-
+  Equal AI office, 3rd floor, RMZ The Loft, Raidurg. Show the order at the ground-floor security desk,
+  take the lift to the 3rd floor and ask reception for Shiva. If security stops you, wait at the desk:
+  Shiva will come down.
