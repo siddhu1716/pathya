@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { Bot, CheckCircle2, Loader2, Phone, PhoneOff, Wrench } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 type Line = { role: "ai" | "them" | "tool"; text: string };
@@ -28,6 +29,7 @@ export default function CallPage() {
   const add = (l: Line) => {
     transcript.current = [...transcript.current, l];
     setLines(transcript.current);
+    if (id) api.line(id, l).catch(() => undefined);     // the home screen shows the call live
   };
 
   useEffect(() => {

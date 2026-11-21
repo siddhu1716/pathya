@@ -53,12 +53,65 @@ export type Job = {
 
 export type TimelineEvent = { ts: number; expert: string; ref: string; what: string };
 
+export type Line = { role: "ai" | "them" | "tool"; text: string };
+
+export type LiveCall = {
+  id: string;
+  who: string;
+  kind: string;
+  expert: string;
+  direction: "inbound" | "outbound";
+  started: number;
+  lines: Line[];
+};
+
+export type Journey = {
+  call_started?: number;
+  call_ended?: number;
+  card_ready?: number;
+  tapped?: number;
+  placed: number;
+  delivered?: number | null;
+};
+
+export type Order = {
+  id: string;
+  store: string; // swiggy | zepto | dry run
+  card: string | null;
+  ref: string | null;
+  items: string[];
+  total: string | null;
+  address: string | null;
+  status: string | null;
+  eta: string | null;
+  placed: number;
+  updated: number;
+  delivered: number | null;
+  journey: Journey;
+};
+
+export type CallRecord = {
+  id: string;
+  who: string;
+  kind: string | null;
+  expert: string | null;
+  direction: string;
+  source: string;
+  ended: number;
+  seconds: number | null;
+  transcript: Line[];
+  saved: Record<string, any>;
+};
+
 export type Person = { key: string; name: string; role: string; language: string };
 export type Clinic = { key: string; doctor: string; clinic: string };
 
 export type AppState = {
   dry_run: boolean;
   swiggy: boolean;
+  zepto: boolean;
+  phone: boolean;
+  phone_number: string | null;
   user: string;
   people: Person[];
   clinics: Clinic[];
@@ -66,6 +119,8 @@ export type AppState = {
   recent: CardRow[];
   jobs: Job[];
   ringing: Job[];
+  live: LiveCall[];
+  orders: Order[];
   timeline: TimelineEvent[];
 };
 
@@ -105,4 +160,23 @@ export const api = {
   reject: (id: string) => post<{ ok: boolean }>(`/api/cards/${id}/reject`),
   runNow: (id: string) => post<{ ok: boolean }>(`/api/jobs/${id}/run-now`),
   icsUrl: (id: string) => `/api/cards/${id}/ics`,
+  calls: () => request<CallRecord[]>("/api/calls"),
+  orders: () => request<Order[]>("/api/orders"),
+  line: (id: string, line: Line) => post<{ ok: boolean }>(`/api/calls/${id}/line`, line),
+};
+
+export const ago = (ts: number) => {
+  const s = Math.max(0, Math.round(Date.now() / 1000 - ts));
+  if (s < 60) return `${s}s ago`;
+  if (s < 3600) return `${Math.round(s / 60)} min ago`;
+  return new Date(ts * 1000).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
+};
+
+export const clock = (ts: number) =>
+  new Date(ts * 1000).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+
+export const span = (a?: number | null, b?: number | null) => {
+  if (!a || !b) return "";
+  const s = Math.max(0, Math.round(b - a));
+  return s < 90 ? `${s}s` : `${Math.round(s / 60)} min`;
 };

@@ -125,7 +125,7 @@ def state(request: Request):
         "ringing": ringing,
         "live": [{"id": jid, **{k: v for k, v in c.items() if k != "lines"}, "lines": c["lines"][-8:]}
                  for jid, c in st.live.items()],
-        "orders": store.orders(limit=10),
+        "orders": [dict(o, journey=_journey(store, o)) for o in store.orders(limit=10)],
         "timeline": store.timeline(limit=30),
     }
 
@@ -150,9 +150,23 @@ def calls(request: Request):
     return out[:30]
 
 
+def _journey(store, o):
+    """Timestamps for one order's journey: call -> card -> tap -> placed -> delivered (slide 4's numbers)."""
+    j = {"placed": o["placed"], "delivered": o.get("delivered")}
+    card = store.card(o["card"]) if o.get("card") else None
+    if card:
+        j["card_ready"], j["tapped"] = card["created"], card["updated"]
+    call = store.facts(prefix=f"call:{o['ref']}") if o.get("ref") else []
+    if call:
+        secs = (call[0]["value"] or {}).get("seconds") or 0
+        j["call_ended"], j["call_started"] = call[0]["updated"], call[0]["updated"] - secs
+    return j
+
+
 @api.get("/orders")
 def orders(request: Request):
-    return _st(request).store.orders(limit=30)
+    store = _st(request).store
+    return [dict(o, journey=_journey(store, o)) for o in store.orders(limit=30)]
 
 
 @api.post("/ask")
