@@ -14,6 +14,7 @@ class CallPlan:
     tools: list[Callable] = field(default_factory=list)   # plain functions; the caller wraps them
     max_minutes: int = 5
     saved: dict = field(default_factory=dict)
+    language: str = ""                    # the call opens in this language (app/core/lang.py); then follows the person
 
 
 @dataclass

@@ -91,7 +91,7 @@ def test_my_number_gets_the_home_line_in_telugu_and_a_cart_after(monkeypatch):
     t["log_food"]("lunch", "rice and pappu")
     t["ran_out"](["rice"])
     t["medicine_taken"]("yes, took it after breakfast")
-    t["end_call"]("Ordered milk and tomatoes")
+    t["end_call"]("Ordered milk and tomatoes", True, "all_done")
     card = asyncio.run(home.after_call(job, plan.saved))
     assert card.kind == "order" and seen == ["2 litres milk, 1 kg tomatoes"]            # still needs a tap
     assert pantry.today(store, HH)["total"]["kcal"] == 300 and pantry.items(store) == []
@@ -127,6 +127,58 @@ def test_ring_in_browser_override_and_failed_call_card(monkeypatch):
         client.post("/calls/status", data={"CallSid": "CA77", "CallStatus": "failed", "CallDuration": "0"})
     card = store.cards()[0]["card"]
     assert "did not connect" in card["title"] and "Shiva" in card["title"]
+    from app.main import _check_stream_started
+    asyncio.run(_check_stream_started(app.state, jid, "Shiva", wait=0))          # completed, but no audio stream
+    assert "press" in store.cards()[0]["card"]["title"] and "trial" in store.cards()[0]["card"]["lines"][0]
+
+
+def test_swiggy_offline_falls_back_to_zepto_or_keeps_the_list(monkeypatch):
+    from app.experts.kitchen import zepto as zp
+    from app.experts.kitchen.expert import KitchenExpert
+    store = Store(":memory:")
+
+    async def build(z, items, hint=None, advice=""):
+        assert items == ["2 litres milk", "1 kg tomatoes"]
+        return {"id": "z1", "addressLine": "RMZ The Loft"}, {"cart": {"items": [{"name": "Milk 1 L", "quantity": 2, "price": 6400}]},
+                                                             "total": 140.0, "cod": True}, []
+    monkeypatch.setattr(zp, "build", build)
+    card = asyncio.run(KitchenExpert(store, HH, None, None, zepto=object()).handle("2 litres milk, 1 kg tomatoes"))
+    assert card.title == "Zepto cart (Instamart offline)" and card.payload["store"] == "zepto"
+    assert card.total == "₹140" and card.address == "RMZ The Loft" and card.choices == [{"id": "COD", "label": "Cash on delivery"}]
+    assert "proceed with placing this order to this address" in card.question            # rule 4 on the fallback too
+    none = KitchenExpert(store, HH, None, None, None)
+    info = asyncio.run(none.handle("2 litres milk, 1 kg tomatoes"))
+    assert info.kind == "info" and info.lines == ["2 litres milk", "1 kg tomatoes"]       # nothing said on a call is lost
+    assert asyncio.run(none.execute(info.to_dict(), "ok")) == {"ok": True}                # an info tap never orders
+
+
+def test_card_from_an_unregistered_expert_taps_ok():
+    app, store, _ = env()
+    aid = store.add_card(Card("caller", "info", "Call to Amma did not connect", ["x"], question="",
+                              choices=[{"id": "ok", "label": "OK"}]).to_dict())
+    with TestClient(app) as client:
+        assert client.post(f"/api/cards/{aid}/tap", json={"choice": "ok"}).json()["status"] == "done"
+
+
+def test_every_call_follows_the_language_and_wraps_up_before_ending():
+    from app.core import convo
+    from app.experts.kitchen.expert import KitchenExpert
+    app, store, _ = env()
+    ex = app.state.experts
+    kitchen = KitchenExpert(store, HH, None, None)
+    jobs = [(kitchen, store.job(kitchen.weekly_call("amma"))),
+            (kitchen, store.job(kitchen.menu_call("lakshmi", {"day": "Mon", "meals": []}))),
+            (ex["health"], store.job(ex["health"].checkin("amma", "hi"))),
+            (ex["health"], store.job(ex["health"].book("amma", "rao", "2026-11-24T00:00", "2026-11-25T00:00", None, "BP"))),
+            (ex["home"], store.job(ex["home"].call_me())),
+            (ex["doorstep"], store.job(ex["doorstep"].answered("CA1", "1234")))]
+    for expert, job in jobs:
+        plan = expert.call_plan(job)
+        text = convo.instructions(plan)
+        assert plan.language == "Telugu" and text.startswith("LANGUAGE: open in Telugu") and "BEFORE ENDING" in text
+        end = {f.__name__: f for f in plan.tools}["end_call"]
+        assert end("x", False, "all_done").startswith("Not yet") and "summary" not in plan.saved
+        assert convo.ends_call("end_call", end("x", False, "person_said_goodbye")) and plan.saved["summary"] == "x"
 
 
 def test_app_key_guards_the_api(monkeypatch):

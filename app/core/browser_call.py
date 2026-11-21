@@ -9,6 +9,8 @@ import time
 
 import httpx
 
+from app.core import convo
+
 REALTIME_URL = "https://api.openai.com/v1/realtime/calls"
 
 
@@ -33,7 +35,7 @@ def session_config(plan, model=None, voice=None, audio_format=None):
     return {
         "type": "realtime",
         "model": model or os.getenv("REALTIME_MODEL", "gpt-realtime-2.1"),
-        "instructions": plan.instructions,
+        "instructions": convo.instructions(plan),
         "audio": {"input": audio_in, "output": audio_out},
         "tools": tool_specs(plan),
         "tool_choice": "auto",
@@ -77,7 +79,7 @@ class Call:
     async def run_tool(self, name, arguments):
         """Run one tool the model asked for. Unknown tools and calls past the time limit are refused."""
         if self.ended or time.time() > self.deadline + 30:
-            return "The call time is over. Say goodbye now."
+            return "The call time is over. " + convo.GOODBYE
         f = self.tools.get(name)
         if not f:
             return f"Unknown tool {name}."
@@ -86,6 +88,9 @@ class Call:
             out = f(**args)
             if inspect.isawaitable(out):
                 out = await out
-            return str(out)
+            out = str(out)
         except Exception as err:                      # tell the model, keep the call going
             return f"Tool error: {err}"
+        if name != "end_call" and time.time() > self.deadline - 60:
+            out += " Less than a minute is left: recap, say goodbye and call end_call with why=time_up."
+        return out

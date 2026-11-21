@@ -5,7 +5,7 @@ that ran out, say what is at home and what is running low, and suggest a simple 
 It never gives medical or diet advice and never commits anything."""
 import time
 
-from app.core import lang, safety
+from app.core import convo, lang, safety
 from app.experts.base import CallPlan, Card, Expert
 from app.experts.health.expert import EMERGENCY, NO_ADVICE, next_at
 from app.experts.kitchen import pantry
@@ -38,7 +38,7 @@ CHECKIN = ("ask one thing at a time: (1) only if medicines are listed, whether t
            "today; (3) whether to reorder what is running low; then offer one dish idea for tomorrow from what is "
            "at home.")
 EMERGENCY_SELF = ("If they mention chest pain, breathlessness, fainting, sudden weakness on one side, heavy bleeding, "
-                  "or say it is an emergency: tell them calmly to call 108 now, and end the call.")
+                  "or say it is an emergency: tell them calmly to call 108 now, and end the call (why=emergency).")
 
 
 class HomeExpert(Expert):
@@ -104,7 +104,7 @@ class HomeExpert(Expert):
             meds=", ".join(self.meds()) or "none listed",
             plan=" · ".join(f"{m['slot']}: {m['dish']}" for m in first_day.get("meals", [])) or "none",
             no_advice=NO_ADVICE, emergency=EMERGENCY_SELF),
-            greeting, max_minutes=6)
+            greeting, max_minutes=6, language=language)
         s = plan.saved
 
         def set_order(items: list[str]) -> str:
@@ -127,10 +127,7 @@ class HomeExpert(Expert):
             s["ran_out"] = sorted(set(s.get("ran_out", []) + items))
             return "Noted. Offer to add them to the order."
 
-        def end_call(summary: str) -> str:
-            """Finish the call with a one-line English summary."""
-            s["summary"] = summary
-            return "Say goodbye now."
+        end_call = convo.end_call_tool(s)
 
         plan.tools = [set_order, log_food, medicine_taken, ran_out, end_call]
         return plan
@@ -158,8 +155,8 @@ class HomeExpert(Expert):
         for line in lines:
             self.store.log(self.name, job["id"], line)
         items = saved.get("items") or []
-        if items and getattr(self.kitchen, "ops", None) is not None:
-            return await self.kitchen.handle(", ".join(items), ref=job["id"])
+        if items and self.kitchen is not None:
+            return await self.kitchen.handle(", ".join(items), ref=job["id"])   # Instamart, else Zepto, else the list
         if items:
             lines.append("Wanted: " + ", ".join(items) + " (Swiggy is offline, so no cart yet)")
         if not lines and not saved.get("summary"):

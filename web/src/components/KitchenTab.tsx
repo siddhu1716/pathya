@@ -44,7 +44,7 @@ function Usuals({ state }: { state: AppState }) {
           );
         })}
       </Panel>
-      <Button className="w-full h-12" disabled={!chosen.length || reorder.isPending || !state.swiggy}
+      <Button className="w-full h-12" disabled={!chosen.length || reorder.isPending || !(state.swiggy || state.zepto)}
               onClick={() => reorder.mutate(chosen.map((u) => `${u.typical} x ${u.name}`))}>
         {reorder.isPending && <Loader2 className="animate-spin" />}
         {reorder.isPending ? "Building the cart" : chosen.length ? `Reorder ${chosen.length} item${chosen.length > 1 ? "s" : ""}` : "Pick items to reorder"}

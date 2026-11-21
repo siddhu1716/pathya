@@ -101,6 +101,11 @@ export function StartActions({ state }: { state: AppState }) {
           </div>
         </div>
       )}
+      {state.phone && ring === "phone" && (
+        <p className="px-1 pb-3 text-[12px] text-muted-foreground">
+          Twilio trial: after the short English message, press any key so QuickPick starts talking. Jio numbers can't receive these calls.
+        </p>
+      )}
       <Panel className="divide-y overflow-hidden">
         <Row icon={PhoneCall} title="Call me now" sub={`Medicines, meals, what's running low · ${state.language}`}
              disabled={callMe.isPending} onClick={() => callMe.mutate()} />
@@ -112,8 +117,8 @@ export function StartActions({ state }: { state: AppState }) {
                sub={`Kitchen · ${p.language}`} disabled={callList.isPending}
                onClick={() => callList.mutate(p.key)} />
         ))}
-        <Row icon={Keyboard} title="Type a list" sub={state.swiggy ? "Instamart cart, Zepto for what's missing" : "Swiggy is offline"}
-             disabled={!state.swiggy} onClick={() => setSheet("list")} />
+        <Row icon={Keyboard} title="Type a list" sub={state.swiggy ? "Instamart cart, Zepto for what's missing" : state.zepto ? "Instamart offline: Zepto cart" : "Stores offline"}
+             disabled={!(state.swiggy || state.zepto)} onClick={() => setSheet("list")} />
         <Row icon={CalendarClock} title="Book a doctor" sub="Phones the clinic, books only inside your window" onClick={() => setSheet("book")} />
         {family.map((p) => (
           <Row key={`c-${p.key}`} icon={HeartPulse} title={`Check in with ${p.name}`} sub="Health · questions for the doctor"

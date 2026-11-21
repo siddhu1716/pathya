@@ -103,8 +103,8 @@ def _expert(request, name):
 
 def _kitchen_ready(request):
     k = _expert(request, "kitchen")
-    if getattr(k, "ops", None) is None:
-        raise HTTPException(503, "Swiggy is not connected. Run: npx -y mcp-remote https://mcp.swiggy.com/im")
+    if getattr(k, "ops", None) is None and getattr(k, "zepto", None) is None:
+        raise HTTPException(503, "No store is connected (Swiggy and Zepto are both offline). Try again in a few minutes.")
     return k
 
 
@@ -426,7 +426,7 @@ async def tap(aid: str, body: Tap, request: Request):
         return st.store.card(aid)                           # double tap: nothing runs again
     expert = st.experts.get(card["expert"])
     try:
-        result = await expert.execute(card, body.choice)
+        result = await expert.execute(card, body.choice) if expert else {"ok": True}   # e.g. "call did not connect"
     except Exception as err:                                # a failed card never reopens: no silent retry
         st.store.finish(aid, False, {"ok": False, "error": str(err)})
         return st.store.card(aid)
@@ -561,7 +561,8 @@ async def call_tool(jid: str, body: ToolCall, request: Request):
     call = _live(request, jid)
     out = await call.run_tool(body.name, body.arguments)
     _st(request).store.log(call.expert.name, jid, f"{body.name} -> {out}")   # refusals show on the timeline
-    return {"output": out, "end": body.name == "end_call"}
+    from app.core.convo import ends_call
+    return {"output": out, "end": ends_call(body.name, out)}
 
 
 async def _after_call(st, call, jid):
@@ -646,6 +647,22 @@ def _answer_incoming(st, caller, call_sid):
     return jid
 
 
+def _call_problem(store, title, hint):
+    from app.experts.base import Card
+    store.add_card(Card("caller", "info", title, [hint], question="", choices=[{"id": "ok", "label": "OK"}]).to_dict())
+
+
+TRIAL_HINT = ("The call connected but the AI never started. On a Twilio trial account the person hears a trial message "
+              "and must press any key before QuickPick speaks. Add funds to Twilio to remove it.")
+
+
+async def _check_stream_started(st, jid, who, wait=5):
+    """Twilio says 'completed' but no audio stream ever reached us: almost always the trial key press."""
+    await asyncio.sleep(wait)
+    if jid not in st.calls and not st.store.facts(prefix=f"call:{jid}"):
+        _call_problem(st.store, f"Call to {who}: nobody pressed a key", TRIAL_HINT)
+
+
 def exotel_auth_ok(header):
     """Exotel's Voicebot applet sends the user:pass from its wss://user:pass@host URL as HTTP Basic auth."""
     import base64
@@ -687,19 +704,22 @@ def build_app(lifespan=None) -> FastAPI:
     @app.post("/calls/status")
     async def call_status(request: Request):
         form = await request.form()
-        store = request.app.state.store
+        st = request.app.state
+        store = st.store
         status, sid = form.get("CallStatus", ""), form.get("CallSid", "")
         store.log("caller", sid, f"call {status} ({form.get('CallDuration', '0')} s)")
+        job = next((j for j in store.recent_jobs(time.time() - 3600)
+                    if isinstance(j.get("result"), dict) and j["result"].get("call_sid") == sid), None)
+        if not job:
+            return PlainTextResponse("")
+        who = _who(st.household, job["person"])
         if status in ("failed", "busy", "no-answer", "canceled"):          # say so in the app, not only in the log
-            from app.experts.base import Card
-            job = next((j for j in store.recent_jobs(time.time() - 3600)
-                        if isinstance(j.get("result"), dict) and j["result"].get("call_sid") == sid), None)
-            if job:
-                who = _who(request.app.state.household, job["person"])
-                hint = ("The phone network may be refusing international calls (Jio does). Try another number, "
-                        "or answer in the browser.") if status == "failed" else "Nobody answered."
-                store.add_card(Card("caller", "info", f"Call to {who} did not connect ({status})", [hint],
-                                    question="", choices=[{"id": "ok", "label": "OK"}]).to_dict())
+            hint = ("The phone network refused the call. Jio blocks international numbers; try another number, "
+                    "or set 'Calls ring on: This browser'.") if status == "failed" else "Nobody answered."
+            _call_problem(store, f"Call to {who} did not connect ({status})", hint)
+        elif status == "completed":
+            st.tasks.add(t := asyncio.create_task(_check_stream_started(st, job["id"], who)))
+            t.add_done_callback(st.tasks.discard)
         return PlainTextResponse("")
 
     @app.post("/calls/incoming")

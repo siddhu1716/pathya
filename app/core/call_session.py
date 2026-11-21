@@ -9,6 +9,7 @@ import json
 import os
 from contextlib import asynccontextmanager
 
+from app.core import convo
 from app.core.browser_call import greeting_events, session_config
 from app.core.carriers import Twilio
 
@@ -103,7 +104,7 @@ async def phone_bridge(ws, call_for_start, finish, hang_up, log, connect=connect
                         await oa.send(json.dumps({"type": "conversation.item.create", "item": {
                             "type": "function_call_output", "call_id": ev["call_id"], "output": out}}))
                         await oa.send(json.dumps({"type": "response.create"}))
-                        if ev["name"] == "end_call":
+                        if convo.ends_call(ev["name"], out):
                             state["ending"] = True
                             timers.append(asyncio.create_task(end_phone_call(fallback_s)))
                     elif t == "response.done":

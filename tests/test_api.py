@@ -220,7 +220,11 @@ def test_browser_call_runs_expert_tools_and_makes_card(env, monkeypatch):
     assert tool("book_slot", slot=late, doctor="", fee="", bring="")["output"].startswith("Refused")
     assert any("Refused" in e["what"] for e in store.timeline(ref=jid))          # visible on the timeline
     assert tool("book_slot", slot=good, doctor="Dr. Rao", fee="Rs 500", bring="reports")["output"].startswith("Booked")
-    assert tool("end_call", summary="Booked 10:30")["end"] is True
+    early = tool("end_call", summary="Booked 10:30", person_confirmed_done=False, why="all_done")
+    assert early["end"] is False and early["output"].startswith("Not yet")        # asks "anything else?" first
+    assert tool("end_call", summary="Booked 10:30", person_confirmed_done=True, why="all_done")["end"] is True
+    lang = cfg["instructions"]
+    assert lang.startswith("LANGUAGE:") and lang.rstrip().endswith("Never switch back on your own.")   # first and last
     assert client.post(f"/api/calls/{jid}/end", json={"transcript": [{"role": "ai", "text": "hi"}]}).json()["ok"]
     for _ in range(50):
         if any(c["card"]["kind"] == "booking" for c in store.cards()):
@@ -296,7 +300,7 @@ def test_doorstep_guides_without_ids_or_otp(env):
     tools = {f.__name__: f for f in plan.tools}
     tools["notify_owner"]("Partner is at the security desk")
     assert store.cards()[0]["card"]["kind"] == "alert"
-    tools["end_call"]("Guided the partner to the 3rd floor")
+    tools["end_call"]("Guided the partner to the 3rd floor", True, "all_done")
     assert asyncio.run(d.after_call(store.job(d.answered("CA10", "1234")), plan.saved)).lines[0].startswith("Guided")
 
 

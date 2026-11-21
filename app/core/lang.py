@@ -44,5 +44,5 @@ def greet(lang, mode, user, name=""):
 
 def speak(lang):
     """The prompt line every call uses after the greeting."""
-    return (f"After the first sentence, speak {lang} (mixing in common English words is fine). If the other person "
-            "speaks another language (Telugu, Hindi, English or any other), switch to theirs at once and stay in it.")
+    return (f"After the first sentence, continue in {lang} (mixing in common English words is fine), but always reply in "
+            "the language of the person's most recent sentence: if they switch, you switch at once and stay in theirs.")

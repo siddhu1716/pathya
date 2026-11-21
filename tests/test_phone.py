@@ -52,7 +52,7 @@ class FakeRealtime:
               "arguments": json.dumps({"slot": good, "doctor": "Dr. Rao", "fee": "Rs 500", "bring": "reports"})},
              {"type": "response.done", "response": {"output": [{"type": "function_call"}]}}],
             [{"type": "response.function_call_arguments.done", "call_id": "c3", "name": "end_call",
-              "arguments": json.dumps({"summary": "Booked 10:30"})},
+              "arguments": json.dumps({"summary": "Booked 10:30", "person_confirmed_done": True, "why": "all_done"})},
              {"type": "response.done", "response": {"output": [{"type": "function_call"}]}}],
             [{"type": "response.output_audio_transcript.done", "transcript": "Thank you, goodbye"},
              {"type": "response.done", "response": {"output": [{"type": "message"}]}}],

@@ -2,9 +2,10 @@
 -> one human tap -> order. Items Instamart can't supply get a separate Zepto card (availability, not price).
 Ordering rules live in swiggy.py and zepto.py (tested); this file wires them in."""
 import os
+import re
 import time
 
-from app.core import lang
+from app.core import convo, lang
 from app.experts.base import CallPlan, Card, Expert
 from app.experts.kitchen import planner as pl
 from app.experts.kitchen import swiggy as sw
@@ -71,17 +72,14 @@ class KitchenExpert(Expert):
         why = "here to take the grocery list" if inbound else "calling about this week's groceries"
         plan = CallPlan(LIST_CALL.format(who=p["name"], user=user, greeting=greeting, speak=lang.speak(language),
                                          why=why, usual=", ".join(usual) or "none"),
-                        greeting, max_minutes=5)
+                        greeting, max_minutes=5, language=language)
 
         def save_list(items: list[str], notes: str) -> str:
             """Save the grocery list: one entry per item, with quantity, in the person's words."""
             plan.saved.update(items=items, notes=notes)
             return "Saved. Read it back, at most three items at a time."
 
-        def end_call(summary: str) -> str:
-            """Finish the call with a one-line English summary."""
-            plan.saved["summary"] = summary
-            return "Say goodbye now."
+        end_call = convo.end_call_tool(plan.saved)
 
         plan.tools = [save_list, end_call]
         return plan
@@ -108,17 +106,14 @@ class KitchenExpert(Expert):
         language = lang.of(self.hh, p)
         greeting = lang.greet(language, "calling", user, p["name"])
         plan = CallPlan(MENU_CALL.format(who=p["name"], user=user, greeting=greeting, speak=lang.speak(language),
-                                         menu=menu), greeting, max_minutes=4)
+                                         menu=menu), greeting, max_minutes=4, language=language)
 
         def save_missing(items: list[str], notes: str) -> str:
             """Save what is missing in the kitchen for tomorrow's menu, with quantities, in the cook's words."""
             plan.saved.update(missing=items, notes=notes)
             return "Saved. Read the missing items back, at most three at a time."
 
-        def end_call(summary: str) -> str:
-            """Finish the call with a one-line English summary."""
-            plan.saved["summary"] = summary
-            return "Say goodbye now."
+        end_call = convo.end_call_tool(plan.saved)
 
         plan.tools = [save_missing, end_call]
         return plan
@@ -160,6 +155,8 @@ class KitchenExpert(Expert):
         advice = [str(f["value"]) for f in self.store.facts(prefix="advice:")]
         advice_note = ("Doctor's advice in this home (use it only to choose between products, "
                        "for example low-sodium salt; never add items because of it): " + "; ".join(advice)) if advice else ""
+        if self.ops is None:                                  # Swiggy down (e.g. rate-limited): Zepto, or the list as a card
+            return await self.without_swiggy(text, advice_note, ref)
         if advice_note:
             text += "\n" + advice_note
         addr = await sw.pick_address(self.ops, self.hh.get("address_hint"))
@@ -173,27 +170,50 @@ class KitchenExpert(Expert):
             card.warnings.append(await self.zepto_backup(missing, advice_note, ref))
         return card
 
+    async def without_swiggy(self, text, advice_note="", ref=None):
+        """Instamart is not connected: the whole list goes to Zepto (still a card that needs a tap). With neither store,
+        the list is kept as a card so nothing said on a call is lost."""
+        items = [i.strip() for i in re.split(r"[,\n]", text) if i.strip()]
+        problem = "Swiggy Instamart is not connected right now (it may be rate-limiting)."
+        if self.zepto is not None:
+            try:
+                card, msg = await self.zepto_card(items, advice_note, ref, "Zepto cart (Instamart offline)")
+                if card:
+                    card.warnings.insert(0, problem + " This cart is from Zepto.")
+                    return card
+                problem += " " + msg
+            except Exception as err:
+                problem += f" Zepto failed too: {err}"
+        return Card(self.name, "info", "Your list (no cart yet)", items or [text], question="",
+                    warnings=[problem, "Try again from Kitchen > Type a list when a store is back."],
+                    choices=[{"id": "ok", "label": "OK"}], payload={"ref": ref})
+
+    async def zepto_card(self, items, advice_note="", ref=None, title="Zepto cart"):
+        """A Zepto cart card (rule 4: cart, total, address, payment, question). Returns (card or None, message)."""
+        addr, quote, not_found = await zp.build(self.zepto, items, self.hh.get("address_hint"), advice_note)
+        if not quote:
+            return None, f"Not on Zepto: {', '.join(items)}."
+        lines = [f"{i.get('name')} x{i.get('quantity')} - Rs {(i.get('price') or 0) / 100:.0f}"
+                 for i in quote["cart"].get("items", [])]
+        warnings = [f"Not found on Zepto: {', '.join(not_found)}"] if not_found else []
+        if not quote["cod"]:
+            warnings.append("Zepto did not offer cash on delivery for this cart.")
+        card = Card(self.name, "order", title, lines, total=f"₹{quote['total']:.0f}", address=addr.get("addressLine"),
+                    question="Do you want to proceed with placing this order to this address?",
+                    choices=[{"id": "COD", "label": "Cash on delivery"}] if quote["cod"] else [],
+                    warnings=warnings,
+                    payload={"store": "zepto", "address_id": addr["id"], "approved_total": quote["total"], "ref": ref})
+        return card, ""
+
     async def zepto_backup(self, missing, advice_note="", ref=None):
         """Items Instamart could not supply -> a separate Zepto card. Availability only, never a price comparison."""
         try:
-            addr, quote, not_found = await zp.build(self.zepto, missing, self.hh.get("address_hint"), advice_note)
+            card, msg = await self.zepto_card(missing, advice_note, ref, "Zepto cart (items Instamart didn't have)")
         except Exception as err:
             return f"Not on Instamart: {', '.join(missing)}. Zepto backup failed: {err}"
-        if not quote:
+        if not card:
             return f"Not on Instamart or Zepto: {', '.join(missing)}."
-        lines = [f"{i.get('name')} x{i.get('quantity')} - Rs {(i.get('price') or 0) / 100:.0f}"
-                 for i in quote["cart"].get("items", [])]
-        warnings = [f"Not found on Zepto either: {', '.join(not_found)}"] if not_found else []
-        if not quote["cod"]:
-            warnings.append("Zepto did not offer cash on delivery for this cart.")
-        total = f"₹{quote['total']:.0f}"
-        self.store.add_card(Card(self.name, "order", "Zepto cart (items Instamart didn't have)", lines,
-                                 total=total, address=addr.get("addressLine"),
-                                 question="Do you want to proceed with placing this order to this address?",
-                                 choices=[{"id": "COD", "label": "Cash on delivery"}] if quote["cod"] else [],
-                                 warnings=warnings,
-                                 payload={"store": "zepto", "address_id": addr["id"],
-                                          "approved_total": quote["total"], "ref": ref}).to_dict())
+        self.store.add_card(card.to_dict())
         return f"Not on Instamart: {', '.join(missing)}. A separate Zepto card is ready for them."
 
     def card(self, cart, pay, addr, note="", ref=None):
@@ -220,6 +240,8 @@ class KitchenExpert(Expert):
 
     async def execute(self, card, choice):
         p = card["payload"]
+        if card["kind"] not in ("order", "plan", "brief"):          # info cards: nothing to commit
+            return {"ok": True}
         if card["kind"] == "plan":
             if choice == "order":
                 text = ", ".join(f"{i['quantity']} {i['item']}" for i in p["need"])

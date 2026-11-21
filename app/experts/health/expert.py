@@ -5,7 +5,7 @@ import time
 import urllib.parse
 from datetime import datetime, timedelta, timezone
 
-from app.core import lang, safety
+from app.core import convo, lang, safety
 from app.experts.base import CallPlan, Card, Expert
 
 IST = timezone(timedelta(hours=5, minutes=30))             # India has no daylight saving
@@ -16,7 +16,7 @@ NO_ADVICE = ("You never give medical advice: never suggest, start, stop or chang
              "say whether a symptom or reading is good or bad. If asked, say you will add it to the questions "
              "for the doctor.")
 EMERGENCY = ("If they mention chest pain, breathlessness, fainting, sudden weakness on one side, heavy bleeding, "
-             "or say it is an emergency: call alert_family at once, tell them calmly to call 108 now, and end the call.")
+             "or say it is an emergency: call alert_family at once, tell them calmly to call 108 now, and end the call (why=emergency).")
 
 CLINIC_CALL = """You are QuickPick, an AI assistant, phoning {clinic} for {user} to book an appointment
 for {patient} (age {age}) with {doctor}. Your first sentence: "{greeting}" {speak}
@@ -121,7 +121,7 @@ class HealthExpert(Expert):
                                            age=pat.get("age", ""), doctor=c["doctor"], greeting=greeting,
                                            speak=lang.speak(language),
                                            reason=p["reason"], callback=user["phone"], window=window),
-                        greeting, max_minutes=6)
+                        greeting, max_minutes=6, language=language)
         s = plan.saved
 
         def ok(slot):
@@ -151,10 +151,7 @@ class HealthExpert(Expert):
             s["held"] = {"slot": slot, "note": note}
             return "Noted. Tell them the family will call back to confirm."
 
-        def end_call(summary: str) -> str:
-            """Finish the call with a one-line English summary."""
-            s["summary"] = summary
-            return "Say goodbye now."
+        end_call = convo.end_call_tool(s)
 
         plan.tools = [offer_slots, book_slot, hold_slot, end_call]
         return plan
@@ -167,7 +164,7 @@ class HealthExpert(Expert):
         plan = CallPlan(CHECKIN_CALL.format(patient=pat["name"], user=user["name"], speak=lang.speak(language),
                                             greeting=greeting, purpose=p["purpose"], meds=meds,
                                             no_advice=NO_ADVICE, emergency=EMERGENCY),
-                        greeting, max_minutes=5)
+                        greeting, max_minutes=5, language=language)
         s = plan.saved
 
         def save_checkin(feeling: str, new_symptoms: list[str], since: str, readings: list[str],
@@ -186,10 +183,7 @@ class HealthExpert(Expert):
                                      choices=[{"id": "ok", "label": "I'm calling"}]).to_dict())
             return "Family alerted. Tell them calmly to call 108 now if it is an emergency."
 
-        def end_call(summary: str) -> str:
-            """Finish the call with a one-line English summary."""
-            s["summary"] = summary
-            return "Say goodbye now."
+        end_call = convo.end_call_tool(s)
 
         plan.tools = [save_checkin, alert_family, end_call]
         return plan

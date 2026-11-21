@@ -1,7 +1,7 @@
 """Doorstep Expert: answers calls to the household's QuickPick number from people who are not in household.yaml,
 usually the delivery partner. It knows only what is on the way and the family's own delivery instructions,
 guides the partner in, never shares an OTP, payment detail or ID, and leaves the family a card."""
-from app.core import lang
+from app.core import convo, lang
 from app.experts.base import CallPlan, Card, Expert
 
 DOORSTEP_CALL = """You are QuickPick, an AI assistant answering {user}'s phone. Your first sentence: "{greeting}"
@@ -48,7 +48,7 @@ class DoorstepExpert(Expert):
         greeting = lang.greet(language, "phone", user)
         plan = CallPlan(DOORSTEP_CALL.format(user=user, greeting=greeting, orders=self.on_the_way(), speak=lang.speak(language),
                                              instructions=self.hh.get("delivery_instructions") or DEFAULT_INSTRUCTIONS),
-                        greeting, max_minutes=3)
+                        greeting, max_minutes=3, language=language)
         s = plan.saved
 
         def notify_owner(reason: str) -> str:
@@ -64,10 +64,7 @@ class DoorstepExpert(Expert):
             s["message"] = {"from": caller_name, "text": message}
             return "Saved. Thank them and end the call."
 
-        def end_call(summary: str) -> str:
-            """Finish the call with a one-line English summary."""
-            s["summary"] = summary
-            return "Say goodbye now."
+        end_call = convo.end_call_tool(s)
 
         plan.tools = [notify_owner, take_message, end_call]
         return plan

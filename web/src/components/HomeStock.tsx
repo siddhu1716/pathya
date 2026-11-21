@@ -64,7 +64,7 @@ export function AtHome({ state, compact = false }: { state: AppState; compact?: 
         ))}
       </Panel>
       {low.length > 0 && (
-        <Button className="w-full h-12" disabled={reorder.isPending || !state.swiggy} onClick={() => reorder.mutate()}>
+        <Button className="w-full h-12" disabled={reorder.isPending || !(state.swiggy || state.zepto)} onClick={() => reorder.mutate()}>
           {reorder.isPending ? <><Loader2 className="animate-spin" /> Building the cart</> : `Reorder ${low.length} running low`}
         </Button>
       )}
