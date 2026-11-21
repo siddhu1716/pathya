@@ -143,5 +143,6 @@ def test_pharmacy_found_near_you_is_added_only_after_a_tap_and_the_call_never_or
     assert card.kind == "pharmacy_answer" and "1 of 1 available" in card.title
     assert any("not accepted" in l and "Simcard 10" in l for l in card.lines)
     assert card.payload["wa"].startswith("https://wa.me/919848022338?text=") and "Simvotin" in card.payload["share_text"]
+    assert card.payload["safety"] == "unchecked"                                                # passed safety.check
     assert pharmacy.add_to_household(str(path), hh, {"name": "Apollo again", "phone_e164": "+914023112345"}) == \
         "apollo-pharmacy-madhapur"                                                                  # same number: reused

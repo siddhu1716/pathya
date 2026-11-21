@@ -505,7 +505,9 @@ class HealthExpert(Expert):
                         [saved.get("summary") or "The call ended before they answered."], question="",
                         choices=[{"id": "ok", "label": "OK"}])
         to = e164_or(a.get("whatsapp"), ph["phone"])
-        text = pharmacy.order_text(user, self.person(p["patient"]).get("name", p["patient"]), p["meds"], self.address())
+        verdict = safety.check(pharmacy.order_text(user, self.person(p["patient"]).get("name", p["patient"]), p["meds"],
+                                                   self.address()))
+        text = verdict.text
         lines = [f"Have: {', '.join(a['in_stock']) or 'none said'}"]
         if a.get("not_in_stock"):
             lines.append(f"Don't have: {', '.join(a['not_in_stock'])}")
@@ -517,7 +519,7 @@ class HealthExpert(Expert):
         return Card(self.name, "pharmacy_answer", f"{ph['name']}: {len(a['in_stock'])} of {len(p['meds'])} available"[:80],
                     lines, question="To order, send them the prescription photo and the list on WhatsApp.",
                     choices=[{"id": "whatsapp", "label": "Open WhatsApp with the list"}, {"id": "ok", "label": "Done"}],
-                    payload={"wa": wa_link(to, text), "photo": p.get("photo"), "share_text": text})
+                    payload={"wa": wa_link(to, text), "photo": p.get("photo"), "share_text": text, "safety": verdict.status})
 
     def _start_reminders(self, patient, rx, photo=None):
         """Confirmed prescription: medicines kept as written (same names replace older entries) and daily reminder
