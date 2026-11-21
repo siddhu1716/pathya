@@ -86,7 +86,7 @@ class KitchenExpert(Expert):
         return plan
 
     async def after_call(self, job, saved):
-        if job["kind"] == "menu":
+        if job.get("kind") == "menu":
             missing = saved.get("missing") or []
             if not missing:
                 return Card(self.name, "info", "The cook has everything for tomorrow",
