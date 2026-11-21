@@ -1,6 +1,6 @@
 # AGENTS.md: QuickPick v2 (Experts)
 
-QuickPick Experts phone a family's people (the cook, Amma) and their clinic, turn what they say into a Swiggy Instamart order or a doctor's appointment, and wait for a human tap before anything is committed. Read docs/BUILD_V2.md before any task.
+QuickPick (family nutrition, from a phone call to the plate) phones a family's people (each member, the cook) and their clinic, in their language. It keeps a profile, personal targets, a food log and medicine reminders for every member; plans one menu with a plate per person; turns what people say into a Swiggy Instamart (or Zepto) order or a doctor's appointment; and waits for a human tap before anything is committed. Read docs/BUILD_V2.md before any task.
 
 ## Hard rules: never break them, never "simplify" them away
 1. Only `swiggy.place()` may call Swiggy `checkout`, and only from a card the human tapped. Never retry checkout; on error, list active orders and stop.
@@ -24,14 +24,24 @@ Python 3.11+, FastAPI, Jinja2 + HTMX (Pico.css), SQLite (app/core/store.py), ope
 - app/experts/base.py: the Expert contract and registry
 - app/experts/kitchen/: swiggy.py (ordering rules, tested), zepto.py, planner.py, pantry.py (at home, food log), expert.py
 - app/experts/health/: expert.py, rx.py
-- app/experts/home/: the user's own line (orders, food log, medicine check-in in their words); doorstep/: unknown callers
+- app/experts/family/: profiles.py (members, goals, targets), meds.py (as written, daily reminders), board.py (weekly leaderboard)
+- app/experts/home/: the Family line: check-in and medicine reminder calls for any member with a household.yaml phone; doorstep/: unknown callers
 - app/core/lang.py: call languages (Telugu default; household.yaml `language:` and per-person `language:`)
+- app/core/convo.py: every call follows the caller's language and wraps up before end_call (refused until they confirm)
+- web/: the React app (Home, Family, Meals, Orders, More)
 - app/templates/, scripts/first_order.py, tests/, infra/
 
 ## Commands
-- Run: uvicorn app.main:app --reload --port 8000
+- Run: ./run.sh (local) or ./run.sh phone (tunnel + phone link); or uvicorn app.main:app --reload --port 8000
 - Tests: python tests/test_swiggy_flow.py && python tests/test_v2.py && pytest -q
-- Tunnel: ngrok http 8000
+- Tunnel: ./run.sh phone (cloudflared via scripts/phone.py)
+
+## Family nutrition (how rules 8 and 9 apply)
+- Conditions are stored as the family says the doctor told them; they only choose dishes, portions and swaps. Nothing is diagnosed.
+- Targets are a general reference (formula or ICMR-NIN), labelled as such; a nutritionist's numbers override them.
+- Medicines are kept exactly as written; reminder calls only remind and record the answer in the person's words.
+- The leaderboard scores habits only (meals logged, near own targets, doses taken, calls answered), never readings or weight.
+- Members added in the app have no phone and are never called.
 
 ## Done means
 Tests pass; you list the manual check steps; no change to the hard rules above; small, reviewable diffs.
