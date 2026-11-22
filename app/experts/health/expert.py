@@ -160,10 +160,11 @@ class HealthExpert(Expert):
         who, user = job["payload"]["who"], self.hh["user"]["name"]
         m = P.member(self.hh, self.store, who)
         language = m["language"]
-        greeting = (lang.greet(language, "self", user) if who == "me" else lang.greet(language, "calling", user, m["name"]))
+        name = lang.call_name(self.store, who, m["name"])
+        greeting = lang.greet(language, "self", name) if who == "me" else lang.greet(language, "calling", user, name)
         clinics = "; ".join(f"{c['doctor']} at {c['clinic']}" for c in self.hh["clinics"].values()) or "none"
         members = ", ".join(x["name"] for x in P.members(self.hh, self.store))
-        plan = CallPlan(INTAKE_CALL.format(name=m["name"], user=user, greeting=greeting, speak=lang.speak(language),
+        plan = CallPlan(INTAKE_CALL.format(name=name, user=user, greeting=greeting, speak=lang.speak(language),
                                            members=members, clinics=clinics, today=datetime.now(IST).strftime("%a %d %b %Y")),
                         greeting, max_minutes=6, language=language)
         s = plan.saved
@@ -266,9 +267,10 @@ class HealthExpert(Expert):
     def _checkin_plan(self, p, pat, user):
         meds = ", ".join(m.get("name_as_written", "") for m in self.meds(p["patient"])) or "their usual medicines"
         language = lang.of(self.hh, pat)
-        greeting = (lang.greet(language, "self", user["name"]) if p["patient"] == "me"
-                    else lang.greet(language, "calling", user["name"], pat["name"]))
-        plan = CallPlan(CHECKIN_CALL.format(patient=pat["name"], user=user["name"], speak=lang.speak(language),
+        name = lang.call_name(self.store, p["patient"], pat["name"])
+        greeting = (lang.greet(language, "self", name) if p["patient"] == "me"
+                    else lang.greet(language, "calling", user["name"], name))
+        plan = CallPlan(CHECKIN_CALL.format(patient=name, user=user["name"], speak=lang.speak(language),
                                             greeting=greeting, purpose=p["purpose"], meds=meds,
                                             no_advice=NO_ADVICE, emergency=EMERGENCY),
                         greeting, max_minutes=5, language=language)

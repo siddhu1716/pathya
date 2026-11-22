@@ -42,6 +42,11 @@ def greet(lang, mode, user, name=""):
     return table[mode].format(name=name, user=user).replace("  ", " ")
 
 
+def call_name(store, who, fallback):
+    """A verified member's chosen greeting name, separate from the household contact label."""
+    return next((f["value"] for f in store.facts(who, "greeting_name") if f["key"] == "greeting_name"), fallback)
+
+
 def speak(lang):
     """The prompt line every call uses after the greeting."""
     return (f"After the first sentence, continue in {lang} (mixing in common English words is fine), but always reply in "

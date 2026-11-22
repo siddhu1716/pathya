@@ -32,7 +32,8 @@ What you can do:
 - Groceries: when they want something (or agree to reorder what is running low), call set_order with EVERY item and
   quantity so far (each call replaces the list). Read it back, at most three items at a time. Say the cart goes to
   {user}'s phone to approve with one tap; nothing is ordered before that tap. Never discuss payment details.
-- Food: when they say what they ate, call log_food once per meal, in their words with amounts.
+- Food: ask only about meals still missing today. If they repeat a logged breakfast, lunch or dinner,
+  acknowledge it is already logged. For a missing meal, call log_food once with their words and amounts.
 - Medicines: only if medicines are due today, ask once whether they took them, reading names exactly as written, and
   call medicine_taken with taken (yes, no or not_sure) and their answer in their words. {no_advice}
 - Ran out: when they say something is finished, call ran_out with those items, and offer to add them to the order.
@@ -81,7 +82,9 @@ class HomeExpert(Expert):
         self.store, self.hh, self.kitchen = store, household, kitchen
 
     def member(self, key):
-        return P.member(self.hh, self.store, key)
+        member = P.member(self.hh, self.store, key)
+        member["name"] = lang.call_name(self.store, key, member["name"])
+        return member
 
     def phone(self, key):
         """Only household.yaml numbers (rule 8)."""
@@ -151,10 +154,11 @@ class HomeExpert(Expert):
         return None
 
     # ---- the calls ----
-    def _greeting(self, who, language):
+    def _greeting(self, member, language):
         user = self.hh["user"]["name"]
-        return lang.greet(language, "self", user) if who == "me" else lang.greet(language, "calling", user,
-                                                                                    self.member(who)["name"])
+        if member["key"] == "me":
+            return lang.greet(language, "self", member["name"])
+        return lang.greet(language, "calling", user, member["name"])
 
     def call_plan(self, job):
         return self._meds_plan(job) if job["kind"] == "meds" else self._home_plan(job)
@@ -163,7 +167,7 @@ class HomeExpert(Expert):
         who, p = job["person"], job["payload"]
         m, user = self.member(who), self.hh["user"]["name"]
         language = m["language"]
-        greeting = self._greeting(who, language)
+        greeting = self._greeting(m, language)
         shelf = pantry.items(self.store)
         eaten = pantry.today(self.store, self.hh, who)
         due = M.today(self.store, who)
@@ -175,7 +179,7 @@ class HomeExpert(Expert):
         plan = CallPlan(HOME_CALL.format(
             user=user, name=m["name"], greeting=greeting, speak=lang.speak(language), why=why, about=about,
             meds="; ".join(f"{d['slot']}: {', '.join(d['meds'])}" for d in due) or "none",
-            eaten="; ".join(x["text"] for x in eaten["meals"]) or "nothing noted yet",
+            eaten="; ".join(f"{x['meal']}: {x['text']}" for x in eaten["meals"]) or "nothing noted yet",
             at_home=", ".join(i["name"] for i in shelf[:25]) or "nothing recorded",
             low=", ".join(i["name"] for i in shelf if i["low"]) or "nothing", plate=self.plate(m) or "none",
             notes=", ".join(guard.notes_of(m)) or "none", elder=self._elder(m), visit=self._visit(who),
@@ -187,9 +191,14 @@ class HomeExpert(Expert):
             s["items"] = items
             return f"Saved. Read it back, at most three items at a time; the cart needs {user}'s tap in the app."
 
-        def log_food(meal: str, what: str) -> str:
+        def log_food(meal: Literal["breakfast", "lunch", "dinner", "snack"], what: str) -> str:
             """One meal they ate today (breakfast, lunch, dinner or snack), in their words with amounts."""
-            s.setdefault("meals", []).append({"meal": meal, "what": what})
+            now = time.time()
+            meals = s.setdefault("meals", [])
+            if meal in pantry.MAIN_MEALS and (pantry.slot_entries(self.store, who, meal, now) or any(
+                    m["meal"] == meal and pantry.today_key(m["ts"]) == pantry.today_key(now) for m in meals)):
+                return f"{meal.title()} is already logged. No calories added."
+            meals.append({"meal": meal, "what": what, "ts": now})
             return "Noted."
 
         def medicine_taken(taken: Literal["yes", "no", "not_sure"], their_words: str) -> str:
@@ -216,7 +225,7 @@ class HomeExpert(Expert):
         who, slot = job["person"], job["payload"]["slot"]
         m, user = self.member(who), self.hh["user"]["name"]
         language = m["language"]
-        greeting = self._greeting(who, language)
+        greeting = self._greeting(m, language)
         due = [M.line(x) for x in M.active(M.listed(self.store, who), slot)] or ["(nothing listed any more)"]
         plan = CallPlan(MEDS_CALL.format(user=user, name=m["name"], greeting=greeting, speak=lang.speak(language),
                                          slot=slot, meds="; ".join(due), no_advice=NO_ADVICE, emergency=EMERGENCY),
@@ -277,7 +286,11 @@ class HomeExpert(Expert):
         m, lines = self.member(who), []
         for meal in saved.get("meals") or []:
             try:
-                e = await pantry.log_meal(self.store, meal["what"], meal.get("meal", ""), who=who)
+                e = await pantry.log_meal(self.store, meal["what"], meal.get("meal", ""), who=who,
+                                          now=meal.get("ts"), from_call=True)
+                if e is None:
+                    lines.append(f"{(meal.get('meal') or 'Meal').title()} was already logged.")
+                    continue
                 lines.append(f"{(meal.get('meal') or 'Meal').title()}: {meal['what']} (about {e['kcal']} kcal, "
                              f"protein {e['protein_g']:.0f} g)")
             except Exception as err:

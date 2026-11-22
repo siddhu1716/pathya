@@ -117,6 +117,7 @@ export type AppState = {
   exotel: boolean;
   android_apk?: boolean;
   user: string;
+  viewer?: { who: string; name: string };
   language: string;
   daily_call: number | null;
   people: Person[];
@@ -227,9 +228,9 @@ export const api = {
     request<MealEntry>("/api/kitchen/meal", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ who, id, meal }) }),
   photoUrl: (id: string) => `${server()}/api/photos/${id}${key() ? `?key=${encodeURIComponent(key())}` : ""}`,
   authStatus: () => request<{ phone_sign_in: boolean; needed: boolean }>("/api/auth/status"),
-  signInStart: (phone: string, channel: "sms" | "call" = "sms") =>
-    post<{ sent: boolean; to: string; channel: string }>("/api/auth/start", { phone, channel }),
-  signInCheck: (phone: string, code: string) => post<{ token: string; who: string; name: string }>("/api/auth/check", { phone, code }),
+  signInStart: (phone: string, channel: "sms" | "call", name: string) =>
+    post<{ sent: boolean; to: string; channel: string }>("/api/auth/start", { phone, channel, name }),
+  signInCheck: (phone: string, code: string, name: string) => post<{ token: string; who: string; name: string }>("/api/auth/check", { phone, code, name }),
   me: () => request<{ via: "phone" | "link" | "open"; who: string; name: string; phone_end?: string }>("/api/auth/me"),
   signOut: () => post<{ ok: boolean }>("/api/auth/signout"),
   findPharmacy: (b: { who: string; lat?: number; lng?: number; area?: string; meds?: number[]; via?: string }) =>

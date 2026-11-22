@@ -18,7 +18,7 @@ load_dotenv(ROOT / ".env")                      # before the Experts read env va
 
 from fastapi import APIRouter, FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket
 from fastapi.responses import FileResponse, PlainTextResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 
 from app.core import jobs as J
 from app.core.lang import default as lang_default, of as lang_of
@@ -119,6 +119,7 @@ def _kitchen_ready(request):
 def state(request: Request):
     st = _st(request)
     store, hh = st.store, st.household
+    viewer = auth_me(request)
     waiting = sorted(store.cards("waiting"), key=lambda c: c["card"]["kind"] != "alert")   # urgent cards on top
     called = {f["key"][5:] for f in store.facts(prefix="call:")} | {f["key"][9:] for f in store.facts(prefix="declined:")}
     ringing = [j for j in store.recent_jobs(time.time() - RINGING_WINDOW)
@@ -132,7 +133,7 @@ def state(request: Request):
         "phone_number": os.getenv("TWILIO_FROM") if st.twilio is not None else None,
         "exotel": len(os.getenv("EXOTEL_STREAM_SECRET", "")) >= 16,
         "android_apk": APK.is_file(),
-        "user": hh["user"]["name"],
+        "user": hh["user"]["name"], "viewer": {"who": viewer["who"], "name": viewer["name"]},
         "language": lang_default(hh),
         "daily_call": getattr(st.experts.get("home"), "daily_hour", lambda: None)(),
         "people": [{"key": k, "name": v["name"], "role": v.get("role", ""), "language": lang_of(hh, v),
@@ -165,8 +166,19 @@ CODE_EVERY = 30                                   # seconds between codes to one
 
 class SignIn(BaseModel):
     phone: str
+    name: str = Field(default="", max_length=60)
     code: str = ""
     channel: str = "sms"                      # sms, or call: Twilio reads the code out
+
+    @field_validator("name")
+    @classmethod
+    def greeting_name(cls, value):
+        import unicodedata
+        name = " ".join(value.split())
+        if name and (not any(c.isalpha() for c in name) or any(
+                unicodedata.category(c)[0] not in ("L", "M") and c not in " .-'’\u200c\u200d" for c in name)):
+            raise ValueError("Use letters, spaces, apostrophes or hyphens for your name.")
+        return name
 
 
 @api.get("/auth/status")
@@ -213,19 +225,27 @@ def auth_check(body: SignIn, request: Request):
         raise HTTPException(502, f"Could not check the code: {str(err)[:200]}")
     if not ok:
         raise HTTPException(401, "That code is not right, or it expired. Ask for a new one.")
-    token = auth.start_session(st.store, found[0], found[1], found[2])
+    from app.core.lang import call_name
+    who, fallback, number = found
+    if body.name:
+        st.store.remember(who, "greeting_name", body.name, "verified sign-in")
+    name = body.name or call_name(st.store, who, fallback)
+    token = auth.start_session(st.store, who, name, number)
     st.store.log("auth", found[0], f"{found[1]} signed in with …{_digits(found[2])[-4:]}")
-    return {"token": token, "who": found[0], "name": found[1]}
+    return {"token": token, "who": who, "name": name}
 
 
 @api.get("/auth/me")
 def auth_me(request: Request):
     from app.core import auth
+    from app.core.lang import call_name
+    st = _st(request)
     given = request.headers.get("x-quickpick-key") or request.query_params.get("key") or ""
-    s = auth.session(_st(request).store, given)
+    s = auth.session(st.store, given)
     if s:
-        return {"via": "phone", **s}
-    return {"via": "link" if os.getenv("APP_KEY") else "open", "who": "me", "name": _st(request).household["user"]["name"]}
+        return {"via": "phone", **s, "name": call_name(st.store, s["who"], s["name"])}
+    return {"via": "link" if os.getenv("APP_KEY") else "open", "who": "me",
+            "name": call_name(st.store, "me", st.household["user"]["name"])}
 
 
 @api.post("/auth/signout")
@@ -309,7 +329,7 @@ async def voice_preview(body: VoiceIn, request: Request):
     except ValueError as err:
         raise HTTPException(400, str(err))
     language = lang_default(st.household)
-    text = f"{greet(language, 'self', st.household['user']['name'])} {V.SAMPLES.get(language, V.SAMPLES['English'])}"
+    text = f"{greet(language, 'self', auth_me(request)['name'])} {V.SAMPLES.get(language, V.SAMPLES['English'])}"
     cache = st.voice_cache
     k = (s["voice"], s["accent"], s["pace"], text)
     if k not in cache:
@@ -628,7 +648,7 @@ class Daily(BaseModel):
 @api.post("/home/call")
 def home_call(request: Request):
     """Pathya phones the user now (check-in: medicines they listed, meals, reorders)."""
-    return {"job": _expert(request, "home").call_me(via=_via(request))}
+    return family_call(auth_me(request)["who"], request)
 
 
 @api.post("/home/daily")
@@ -920,7 +940,7 @@ def _taken_at(taken, now=None):
 
 
 @api.post("/scan")
-async def scan_photo(request: Request, who: str = Form("me"), hint: str = Form(""), taken: str = Form(""),
+async def scan_photo(request: Request, who: str | None = Form(None), hint: str = Form(""), taken: str = Form(""),
                      photo: UploadFile = File(...)):
     """One photo: a meal is logged for that person (as breakfast, lunch, snack or dinner from when the photo was taken);
     a medicine, prescription or body report comes back for a human to confirm (nothing is scheduled or saved from it
@@ -930,6 +950,7 @@ async def scan_photo(request: Request, who: str = Form("me"), hint: str = Form("
     from app.experts.family import scan
     from app.experts.kitchen import pantry
     st = _st(request)
+    who = who or auth_me(request)["who"]
     _member(request, who)
     image, mime = await photo.read(), photo.content_type or "image/jpeg"
     if len(image) > 12 * 1024 * 1024:

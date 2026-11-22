@@ -110,6 +110,8 @@ def today_key(now=None):
 
 
 MEALS = ("breakfast", "lunch", "snack", "dinner")
+MAIN_MEALS = ("breakfast", "lunch", "dinner")
+CALL_SOURCE = "family call meal"
 
 
 def slot_now(now=None):
@@ -118,15 +120,31 @@ def slot_now(now=None):
     return "dinner" if h < 4 else "breakfast" if h < 11 else "lunch" if h < 16 else "snack" if h < 19 else "dinner"
 
 
-async def log_meal(store, text, meal="", who="me", estimate=None, now=None, photo=None):
-    """now: when it was eaten (a photo's time), so the meal and the day follow it."""
+def slot_entries(store, who, meal, now):
+    if meal not in MAIN_MEALS:
+        return []
+    return [row for row in store.facts(who, f"meal:{today_key(now)}:") if row["value"].get("meal") == meal]
+
+
+async def log_meal(store, text, meal="", who="me", estimate=None, now=None, photo=None, from_call=False):
+    """Voice fills missing main meals. A photo or typed entry can supply a better record later."""
     now = now or time.time()
+    said = str(meal or "").lower()
+    slot = next((m for m in MEALS if m in said), None) or slot_now(now)
+    if from_call and slot_entries(store, who, slot, now):
+        return None
     est = await (estimate or estimate_meal)(text)
     key = f"meal:{today_key(now)}:{int(now * 1000)}-{uuid.uuid4().hex[:4]}"
-    said = str(meal or "").lower()
-    entry = {"text": text, "meal": next((m for m in MEALS if m in said), None) or slot_now(now), "ts": now, "id": key,
-             **est, **({"photo": photo} if photo else {})}
-    store.remember(who, key, entry, "food log")
+    with store.transaction():
+        rows = slot_entries(store, who, slot, now)
+        if from_call and rows:
+            return None
+        for row in rows:
+            if row["source"] == CALL_SOURCE:
+                key = row["key"]  # replace the voice estimate, keeping the entry ID
+                break
+        entry = {"text": text, "meal": slot, "ts": now, "id": key, **est, **({"photo": photo} if photo else {})}
+        store.remember(who, key, entry, CALL_SOURCE if from_call else "food log")
     return entry
 
 
@@ -134,12 +152,21 @@ def set_meal(store, who, key, meal):
     """Change which meal an entry was (the photo's time may not say it all, e.g. a late lunch)."""
     if meal not in MEALS or not str(key).startswith("meal:"):
         return None
-    row = next((f for f in store.facts(who, key) if f["key"] == key), None)
-    if not row:
-        return None
-    entry = {**row["value"], "meal": meal}
-    store.remember(who, key, entry, row["source"])
-    return entry
+    with store.transaction():
+        row = next((f for f in store.facts(who, key) if f["key"] == key), None)
+        if not row:
+            return None
+        entry = {**row["value"], "meal": meal}
+        for other in slot_entries(store, who, meal, entry["ts"]):
+            if other["key"] == key:
+                continue
+            if row["source"] == CALL_SOURCE:
+                store.forget(who, key)
+                return other["value"]
+            if other["source"] == CALL_SOURCE:
+                store.forget(who, other["key"])
+        store.remember(who, key, entry, row["source"])
+        return entry
 
 
 def today(store, hh, who="me", now=None, goal=None):

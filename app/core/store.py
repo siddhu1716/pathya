@@ -5,6 +5,7 @@ import sqlite3
 import threading
 import time
 import uuid
+from contextlib import contextmanager
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS approvals(id TEXT PRIMARY KEY, expert TEXT, card TEXT, status TEXT,
@@ -61,6 +62,18 @@ class Store:
         conn.row_factory = sqlite3.Row
         self.db = _LockedDB(conn)
         self.db.executescript(SCHEMA)
+
+    @contextmanager
+    def transaction(self):
+        """Hold a write transaction across a read followed by dependent fact updates."""
+        with self.db.lock:
+            self.db.execute("BEGIN IMMEDIATE")
+            try:
+                yield
+                self.db.execute("COMMIT")
+            except BaseException:
+                self.db.execute("ROLLBACK")
+                raise
 
     # ---- events: what happened, when (the timeline in More > Activity) ----
     def log(self, expert, ref, what):

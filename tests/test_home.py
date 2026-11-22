@@ -54,6 +54,54 @@ def test_food_log_today():
     assert t["total"]["kcal"] == 900 and len(t["meals"]) == 2 and t["targets"]["kcal"] == 1885
 
 
+def test_photo_and_family_call_share_main_meals(monkeypatch):
+    app, store, _ = env()
+    home = app.state.experts["home"]
+    job = store.job(home.answered("CA1", "amma"))
+    estimates = []
+
+    async def estimate(text):
+        estimates.append(text)
+        return {"kcal": 350, "protein_g": 11.0}
+
+    monkeypatch.setattr(pantry, "estimate_meal", estimate)
+    now = time.time()
+    asyncio.run(pantry.log_meal(store, "rice and dal", "lunch", "amma", now=now, photo="plate"))
+    plan = home.call_plan(job)
+    log = next(tool for tool in plan.tools if tool.__name__ == "log_food")
+    assert "lunch: rice and dal" in plan.instructions
+    assert "already logged" in log("lunch", "pappu and rice")
+    assert log("breakfast", "idli") == "Noted."
+    assert "already logged" in log("breakfast", "two idli")
+    asyncio.run(home.after_call(job, plan.saved))
+    asyncio.run(home.after_call(job, plan.saved))  # a repeated finalization cannot charge calories twice
+    assert estimates == ["rice and dal", "idli"]
+    assert pantry.today(store, HH, "amma")["total"]["kcal"] == 700
+    breakfast = asyncio.run(pantry.log_meal(store, "two idli", "breakfast", "amma", now=now, photo="breakfast-photo"))
+    assert breakfast["photo"] == "breakfast-photo"
+    assert len(pantry.today(store, HH, "amma")["meals"]) == 2
+    for who, ts, meal in [("me", now, "lunch"), ("amma", now - 86400, "lunch"),
+                          ("amma", now, "snack"), ("amma", now, "snack")]:
+        assert asyncio.run(pantry.log_meal(store, "curd", meal, who, now=ts, from_call=True))
+    assert len(pantry.today(store, HH, "amma")["meals"]) == 4
+
+
+def test_photo_arriving_during_voice_estimate_wins():
+    store = Store(":memory:")
+    now = time.time()
+
+    async def photo_estimate(text):
+        return {"kcal": 420}
+
+    async def voice_estimate(text):
+        await pantry.log_meal(store, "plate", "dinner", estimate=photo_estimate, now=now, photo="photo-id")
+        return {"kcal": 500}
+
+    assert asyncio.run(pantry.log_meal(store, "dinner", "dinner", estimate=voice_estimate, now=now, from_call=True)) is None
+    entry, = pantry.today(store, HH, now=now)["meals"]
+    assert entry["photo"] == "photo-id" and entry["kcal"] == 420
+
+
 def env(monkeypatch=None):
     from app.experts.doorstep.expert import DoorstepExpert
     from app.experts.health.expert import HealthExpert
@@ -328,7 +376,8 @@ def test_phone_sign_in_only_for_family_numbers_and_the_session_opens_the_api(mon
         assert client.post("/api/auth/start", json={"phone": "+1 980 000 0001"}).status_code == 403  # same 10 digits, US
         assert client.post("/api/auth/start", json={"phone": "098000 00001"}).json() == {"sent": True, "to": "…0001", "channel": "sms"}
         assert sent == ["+919800000001"] and client.post("/api/auth/start", json={"phone": "9800000001"}).status_code == 429
-        assert client.post("/api/auth/check", json={"phone": "9800000001", "code": "999999"}).status_code == 401
+        assert client.post("/api/auth/check", json={"phone": "9800000001", "code": "999999", "name": "Wrong"}).status_code == 401
+        assert not store.facts("amma", "greeting_name")
         assert client.post("/api/auth/check", json={"phone": "+19800000001", "code": "123456"}).status_code == 403
         s = client.post("/api/auth/check", json={"phone": "9800000001", "code": "123456"}).json()
         assert s["who"] == "amma" and s["name"] == "Amma" and s["token"].startswith("pathya_")
@@ -339,6 +388,17 @@ def test_phone_sign_in_only_for_family_numbers_and_the_session_opens_the_api(mon
         assert client.post("/api/auth/signout", headers=h).json()["ok"]
         assert client.get("/api/state", headers=h).status_code == 401                              # signed out
         assert client.get("/api/state", headers={"X-QuickPick-Key": "pathya_madeup"}).status_code == 401
+        preferred = "లక్ష్మి"
+        signed = client.post("/api/auth/check", json={"phone": "9800000001", "code": "123456", "name": preferred}).json()
+        h = {"X-QuickPick-Key": signed["token"]}
+        assert client.get("/api/state", headers=h).json()["viewer"] == {"who": "amma", "name": preferred}
+        job = store.job(client.post("/api/home/call?via=browser", headers=h).json()["job"])
+        assert job["person"] == "amma" and job["payload"]["to"] == "+919800000001"
+        assert preferred in app.state.experts["home"].call_plan(job).greeting
+        owner = client.get("/api/state", headers={"X-QuickPick-Key": "s3cret-key-123"}).json()["viewer"]
+        assert owner == {"who": "me", "name": HH["user"]["name"]}
+        again = client.post("/api/auth/check", json={"phone": "9800000001", "code": "123456"}).json()
+        assert again["name"] == preferred
 
 
 def test_one_check_in_call_also_takes_notes_for_the_doctor(monkeypatch):

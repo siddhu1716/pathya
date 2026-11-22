@@ -113,17 +113,18 @@ function Connect({ error }: { error: string }) {
 }
 
 function PhoneSignIn({ onLink }: { onLink: () => void }) {
+  const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [code, setCode] = useState("");
   const [sentTo, setSentTo] = useState<string | null>(null);
   const fail = (e: Error) => toast.error(e.message);
   const [how, setHow] = useState<"sms" | "call">("sms");
   const start = useMutation({
-    mutationFn: (channel: "sms" | "call" = "sms") => api.signInStart(phone, channel),
+    mutationFn: (channel: "sms" | "call" = "sms") => api.signInStart(phone, channel, name.trim()),
     onSuccess: (r) => { setSentTo(r.to); setHow(r.channel === "call" ? "call" : "sms"); }, onError: fail,
   });
   const check = useMutation({
-    mutationFn: () => api.signInCheck(phone, code),
+    mutationFn: () => api.signInCheck(phone, code, name.trim()),
     onSuccess: (r) => { connect(server(), r.token); window.location.reload(); },
     onError: fail,
   });
@@ -136,7 +137,12 @@ function PhoneSignIn({ onLink }: { onLink: () => void }) {
       </p>
       {!sentTo ? (
         <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); if (phone.trim()) start.mutate("sms"); }}>
-          <input className={field} aria-label="Phone number" type="tel" inputMode="tel" autoComplete="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="98480 22338" autoFocus />
+          <label className="block text-sm">What should Pathya call you? <span className="text-muted-foreground">(optional)</span>
+            <input className={cn(field, "mt-1")} autoComplete="given-name" maxLength={60} value={name} onChange={(e) => setName(e.target.value)} placeholder="Your preferred name" />
+          </label>
+          <label className="block text-sm">Phone number
+            <input className={cn(field, "mt-1")} type="tel" inputMode="tel" autoComplete="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="98480 22338" />
+          </label>
           <Button type="submit" className="w-full h-12" disabled={start.isPending || phone.replace(/\D/g, "").length < 10}>
             {start.isPending && <Loader2 className="animate-spin" />} Send code
           </Button>
@@ -268,7 +274,7 @@ const Index = () => {
           </div>
         </div>
       </header>
-      <ScanSheet open={scanning} onClose={() => setScanning(false)} />
+      <ScanSheet open={scanning} onClose={() => setScanning(false)} who={s.viewer?.who} />
 
       <main key={tab} className={cn("page-content mx-auto px-4 pt-5 pb-28 space-y-7", tab === "home" ? "shell-width" : "max-w-2xl")}>
         {s.live.map((c) => <LiveCallBanner key={c.id} call={c} />)}
@@ -286,7 +292,7 @@ const Index = () => {
             <div className="home-hero">
               <div className="hero-copy">
                 <p className="hero-date">{new Date().toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" })}</p>
-                <h1 className="display">{hello}, <span>{s.user}.</span></h1>
+                <h1 className="display">{hello}, <span>{s.viewer?.name ?? s.user}.</span></h1>
                 <p className="hero-description">{cards.length
                   ? `${cards.length} ${cards.length === 1 ? "card is" : "cards are"} waiting for your review.`
                   : "Check in about meals, medicines or groceries by phone."}</p>
