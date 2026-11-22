@@ -250,6 +250,14 @@ def test_swiggy_offline_falls_back_to_zepto_or_keeps_the_list(monkeypatch):
     assert card.title == "Zepto cart (Instamart offline)" and card.payload["store"] == "zepto"
     assert card.total == "₹140" and card.address == "RMZ The Loft" and card.choices == [{"id": "COD", "label": "Cash on delivery"}]
     assert "proceed with placing this order to this address" in card.question            # rule 4 on the fallback too
+    from app.experts.kitchen import swiggy as sw
+    async def unreachable(*args):
+        raise RuntimeError("mcp-remote: Error POSTing to endpoint:")
+    monkeypatch.setattr(sw, "pick_address", unreachable)
+    lost = KitchenExpert(store, HH, object(), object(), zepto=object())
+    backup = asyncio.run(lost.handle("2 litres milk, 1 kg tomatoes", ref="test-call"))
+    assert backup.payload["ref"] == "test-call" and backup.payload["store"] == "zepto"
+    assert backup.choices == [{"id": "COD", "label": "Cash on delivery"}] and not store.orders()
     none = KitchenExpert(store, HH, None, None, None)
     info = asyncio.run(none.handle("2 litres milk, 1 kg tomatoes"))
     assert info.kind == "info" and info.lines == ["2 litres milk", "1 kg tomatoes"]       # nothing said on a call is lost

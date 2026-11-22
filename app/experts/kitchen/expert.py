@@ -199,24 +199,28 @@ class KitchenExpert(Expert):
                        "for example low-sodium salt; never add items because of it): " + "; ".join(advice)) if advice else ""
         if self.ops is None:                                  # Swiggy down (e.g. rate-limited): Zepto, or the list as a card
             return await self.without_swiggy(text, advice_note, ref)
-        if advice_note:
-            text += "\n" + advice_note
-        addr = await sw.pick_address(self.ops, self.hh.get("address_hint"))
-        result = await sw.build_cart(self.agent_im, text, addr["id"])
+        try:
+            addr = await sw.pick_address(self.ops, self.hh.get("address_hint"))
+            result = await sw.build_cart(self.agent_im, text + ("\n" + advice_note if advice_note else ""), addr["id"])
+            cart, _ = await sw.call(self.ops, "get_cart")
+            pay, _ = await sw.call(self.ops, "get_payment_options")
+        except Exception as err:
+            # A previously connected MCP bridge can lose its upstream connection mid-request.
+            # Fall back only while preparing a quote; checkout has its own no-retry contract.
+            if not isinstance(err, (TimeoutError, ConnectionError)) and "error posting to endpoint" not in str(err).lower():
+                raise
+            return await self.without_swiggy(text, advice_note, ref, "Swiggy Instamart could not be reached to prepare this cart.")
         note, missing = (result.note, list(result.missing)) if hasattr(result, "note") else (str(result), [])
-        cart, _ = await sw.call(self.ops, "get_cart")
-        pay, _ = await sw.call(self.ops, "get_payment_options")
         missing += [i.get("itemName") for i in cart.get("unserviceableItems") or [] if i.get("itemName")]
         card = self.card(cart, pay, addr, note, ref)
         if missing and self.zepto is not None:
             card.warnings.append(await self.zepto_backup(missing, advice_note, ref))
         return card
 
-    async def without_swiggy(self, text, advice_note="", ref=None):
+    async def without_swiggy(self, text, advice_note="", ref=None, problem="Swiggy Instamart is not connected right now."):
         """Instamart is not connected: the whole list goes to Zepto (still a card that needs a tap). With neither store,
         the list is kept as a card so nothing said on a call is lost."""
         items = [i.strip() for i in re.split(r"[,\n]", text) if i.strip()]
-        problem = "Swiggy Instamart is not connected right now (it may be rate-limiting)."
         if self.zepto is not None:
             try:
                 card, msg = await self.zepto_card(items, advice_note, ref, "Zepto cart (Instamart offline)")
