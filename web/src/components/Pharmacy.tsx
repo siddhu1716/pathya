@@ -13,7 +13,8 @@ const field = "w-full rounded-xl border bg-white/[0.03] px-3 py-2.5 text-[15px] 
  * total and home delivery. Or open a pharmacy app yourself. */
 export function PharmacySheet({ m, open, onClose }: { m: Member; open: boolean; onClose: () => void }) {
   const qc = useQueryClient();
-  const [picked, setPicked] = useState<number[]>(() => m.meds.map((_, i) => i));
+  // Lines still to be checked against the paper are never read to a pharmacy.
+  const [picked, setPicked] = useState<number[]>(() => m.meds.flatMap((x, i) => (x.unclear ? [] : [i])));
   const [area, setArea] = useState("");
   const [locating, setLocating] = useState(false);
   const [denied, setDenied] = useState(false);
@@ -56,10 +57,13 @@ export function PharmacySheet({ m, open, onClose }: { m: Member; open: boolean; 
             <h3 className="label px-1">Medicines, as written</h3>
             <div className="rounded-2xl border divide-y">
               {m.meds.map((x, i) => (
-                <label key={i} className="flex items-center gap-3 px-4 py-3">
-                  <input type="checkbox" className="w-4 h-4 accent-current" checked={picked.includes(i)}
+                <label key={i} className={cn("flex items-center gap-3 px-4 py-3", x.unclear && "opacity-50")}>
+                  <input type="checkbox" className="w-4 h-4 accent-current" checked={picked.includes(i)} disabled={!!x.unclear}
                          onChange={() => setPicked(picked.includes(i) ? picked.filter((p) => p !== i) : [...picked, i])} />
-                  <span className="text-[15px] min-w-0 truncate">{x.name_as_written}</span>
+                  <span className="min-w-0">
+                    <span className="block text-[15px] truncate">{x.name_as_written}</span>
+                    {x.unclear && <span className="block text-[12px] text-warning">Check it against the paper first</span>}
+                  </span>
                 </label>
               ))}
             </div>

@@ -48,15 +48,19 @@ def speak(lang):
             "the language of the person's most recent sentence: if they switch, you switch at once and stay in theirs.")
 
 
-# Unicode blocks of Indian scripts. The transcriber writes Hindi in Devanagari, Telugu in Telugu script, and so on.
-SCRIPTS = {"Hindi": (0x0900, 0x097F), "Bengali": (0x0980, 0x09FF), "Punjabi": (0x0A00, 0x0A7F),
+# Unicode blocks of Indian scripts, and the languages written in each (the first is assumed when switching to it).
+# The transcriber writes Hindi in Devanagari, Telugu in Telugu script, and so on.
+SCRIPTS = {"Devanagari": (0x0900, 0x097F), "Bengali": (0x0980, 0x09FF), "Gurmukhi": (0x0A00, 0x0A7F),
            "Gujarati": (0x0A80, 0x0AFF), "Odia": (0x0B00, 0x0B7F), "Tamil": (0x0B80, 0x0BFF), "Telugu": (0x0C00, 0x0C7F),
-           "Kannada": (0x0C80, 0x0CFF), "Malayalam": (0x0D00, 0x0D7F), "Urdu": (0x0600, 0x06FF)}
+           "Kannada": (0x0C80, 0x0CFF), "Malayalam": (0x0D00, 0x0D7F), "Arabic": (0x0600, 0x06FF)}
+WRITTEN_IN = {"Devanagari": ("Hindi", "Marathi", "Nepali", "Konkani", "Maithili", "Sanskrit", "Dogri", "Bodo"),
+              "Bengali": ("Bengali", "Assamese", "Manipuri"), "Gurmukhi": ("Punjabi",), "Gujarati": ("Gujarati",),
+              "Odia": ("Odia",), "Tamil": ("Tamil",), "Telugu": ("Telugu",), "Kannada": ("Kannada", "Tulu", "Konkani"),
+              "Malayalam": ("Malayalam",), "Arabic": ("Urdu", "Kashmiri")}
 
 
-def heard(text):
-    """The language of what the person said, from its script; None for English letters (could be English, or Hindi
-    or Telugu typed in English letters), so those are left to the model."""
+def script_of(text):
+    """The Indian script most of what was said is written in, or None (English letters, or too little to tell)."""
     counts = {}
     for ch in str(text or ""):
         cp = ord(ch)
@@ -67,6 +71,13 @@ def heard(text):
         return None
     name, n = max(counts.items(), key=lambda kv: kv[1])
     return name if n >= 3 else None
+
+
+def heard(text):
+    """The language most likely spoken, from its script; None for English letters (could be English, or Hindi or
+    Telugu typed in English letters), so those are left to the model."""
+    script = script_of(text)
+    return WRITTEN_IN[script][0] if script else None
 
 
 def switch_note(language):
@@ -82,8 +93,8 @@ class Follow:
         self.now = opening
 
     def note(self, text):
-        said = heard(text)
-        if said and said != self.now:
-            self.now = said
-            return switch_note(said)
-        return None
+        script = script_of(text)
+        if not script or self.now.title() in WRITTEN_IN[script]:     # same script as now: e.g. Marathi stays Marathi
+            return None
+        self.now = WRITTEN_IN[script][0]
+        return switch_note(self.now)

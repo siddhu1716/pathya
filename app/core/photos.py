@@ -1,4 +1,5 @@
-"""Photos the family scanned (plates, prescriptions, strips, reports), kept so they can look at them again.
+"""Photos the family scanned and can look at again: meal photos (the meal is logged at once) and prescription photos
+(shown on the card to compare; deleted if the card is discarded). Strip and report photos are not kept.
 They are health data: stored only on this server in PHOTOS_DIR (gitignored, never committed, AGENTS.md rule 10) and
 served only through the key-protected API."""
 import os
@@ -36,3 +37,11 @@ def find(pid: str):
         if p.is_file():
             return p, media
     return None
+
+
+def delete(pid):
+    """A photo nobody confirmed (a discarded prescription) is not kept."""
+    found = find(pid) if pid else None
+    if found:
+        found[0].unlink(missing_ok=True)
+    return bool(found)

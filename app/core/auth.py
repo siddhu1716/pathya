@@ -18,15 +18,17 @@ def _digits(n):
 
 
 def who_has(hh, phone):
-    """(member key, name) for a number in household.yaml that may sign in, else None."""
-    d = _digits(normalize(phone))
-    if not d:
+    """(member key, name, stored number) when the typed number is exactly a number in household.yaml that may sign in
+    (the user, or family other than the cook), else None. The code is only ever sent to the stored number, so a number
+    with the same last 10 digits in another country can't sign in or be texted."""
+    typed = normalize(phone)
+    if not typed:
         return None
-    if d == _digits(hh["user"].get("phone")):
-        return "me", hh["user"]["name"]
+    if typed == normalize(hh["user"].get("phone")):
+        return "me", hh["user"]["name"], typed
     for k, p in hh["people"].items():
-        if p.get("role") != "cook" and _digits(p.get("phone")) == d:
-            return k, p["name"]
+        if p.get("role") != "cook" and typed == normalize(p.get("phone")):
+            return k, p["name"], typed
     return None
 
 

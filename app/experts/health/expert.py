@@ -134,8 +134,10 @@ class HealthExpert(Expert):
         return self.store.add_job(self.name, "checkin", patient, payload, run_at)
 
     def meds(self, patient):
+        """Medicines that may be said on a call or shown to a clinic: lines still to be checked against the paper
+        (the reader was unsure of the name) are left out."""
         rows = self.store.facts(patient, "meds")
-        return rows[-1]["value"] if rows else []
+        return [m for m in (rows[-1]["value"] if rows else []) if isinstance(m, dict) and not m.get("unclear")]
 
     # ---- phone calls ----
     def intake(self, who="me", via=None):
@@ -423,6 +425,10 @@ class HealthExpert(Expert):
                                                    (slot + timedelta(minutes=1)).isoformat(), None, r["reason"])]}
         if kind == "meds" and choice == "confirm":
             return self._start_reminders(p["patient"], p["rx"], p.get("photo"))
+        if kind == "meds" and choice == "discard":
+            from app.core import photos
+            photos.delete(p.get("photo"))
+            return {"ok": True, "message": "Discarded. Nothing was saved, and the photo was deleted."}
         if kind == "followup" and choice == "book":
             start = next_at(7)
             return {"ok": True, "jobs": [self.book(p["patient"], self.person(p["patient"]).get("clinic") or next(iter(self.hh["clinics"])),

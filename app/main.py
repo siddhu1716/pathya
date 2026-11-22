@@ -182,7 +182,7 @@ def auth_start(body: SignIn, request: Request):
     if not found:
         raise HTTPException(403, "That number is not in your family's list. Ask whoever runs Pathya to add it "
                                  "(Family > person > Phone).")
-    number, now = auth.normalize(body.phone), time.time()
+    number, now = found[2], time.time()                 # always the stored household number
     sent = st.sign_in_sent
     if now - sent.get(number, 0) < CODE_EVERY:
         raise HTTPException(429, f"A code was just sent. Wait {int(CODE_EVERY - (now - sent[number])) + 1} seconds.")
@@ -205,13 +205,13 @@ def auth_check(body: SignIn, request: Request):
     if st.twilio is None or not found:
         raise HTTPException(403, "That number can't sign in here.")
     try:
-        ok = auth.code_ok(st.twilio, st.store, body.phone, body.code)
+        ok = auth.code_ok(st.twilio, st.store, found[2], body.code)
     except Exception as err:
         raise HTTPException(502, f"Could not check the code: {str(err)[:200]}")
     if not ok:
         raise HTTPException(401, "That code is not right, or it expired. Ask for a new one.")
-    token = auth.start_session(st.store, found[0], found[1], body.phone)
-    st.store.log("auth", found[0], f"{found[1]} signed in with …{_digits(body.phone)[-4:]}")
+    token = auth.start_session(st.store, found[0], found[1], found[2])
+    st.store.log("auth", found[0], f"{found[1]} signed in with …{_digits(found[2])[-4:]}")
     return {"token": token, "who": found[0], "name": found[1]}
 
 
@@ -932,7 +932,7 @@ async def scan_photo(request: Request, who: str = Form("me"), hint: str = Form("
         seen = await asyncio.to_thread(scan.look, image, mime, hint[:40])
     except Exception as err:
         raise HTTPException(502, f"Could not read the photo: {err}")
-    pid = photos.save(image, mime) if seen["kind"] != "other" else None
+    pid = photos.save(image, mime) if seen["kind"] in ("meal", "prescription") else None
     st.store.log("family", who, f"scanned a photo: {seen['kind']}")
     if seen["kind"] == "meal" and seen.get("meal"):
         meal = seen["meal"]
@@ -944,7 +944,7 @@ async def scan_photo(request: Request, who: str = Form("me"), hint: str = Form("
         return {"kind": "meal", "entry": entry, "note": seen["note"], "photo": pid}
     if seen["kind"] == "medicine":
         listed = M.listed(st.store, who)
-        return {"kind": "medicine", "medicines": seen["medicines"], "note": seen["note"], "photo": pid,
+        return {"kind": "medicine", "medicines": seen["medicines"], "note": seen["note"],
                 "matches": [listed[i]["name_as_written"] for i in scan.matches(seen["medicines"], listed)],
                 "due": M.today(st.store, who)}
     if seen["kind"] == "prescription":
@@ -952,12 +952,13 @@ async def scan_photo(request: Request, who: str = Form("me"), hint: str = Form("
         try:
             rx = await asyncio.to_thread(read_prescription, image, mime)
         except Exception as err:
+            photos.delete(pid)
             raise HTTPException(502, f"Could not read the prescription: {err}")
         card = _expert(request, "health").meds_card(who, rx, pid)
         return {"kind": "prescription", "card": st.store.add_card(card.to_dict()), "note": seen["note"], "photo": pid,
                 "count": len(rx.get("meds", []))}
     if seen["kind"] == "body_report" and seen.get("report"):
-        return {"kind": "body_report", "report": seen["report"], "note": seen["note"], "photo": pid}
+        return {"kind": "body_report", "report": seen["report"], "note": seen["note"]}
     return {"kind": "other", "note": seen["note"]}
 
 
@@ -1067,9 +1068,10 @@ async def health_pharmacy(body: PharmacyFind, request: Request):
     st = _st(request)
     m = _member(request, body.who)
     listed = M.listed(st.store, body.who)
-    chosen = [x for i, x in enumerate(listed) if body.meds is None or i in body.meds]
+    chosen = [x for i, x in enumerate(listed) if (body.meds is None or i in body.meds) and not x.get("unclear")]
     if not chosen:
-        raise HTTPException(400, f"{m['name']} has no medicines listed yet. Scan the prescription first.")
+        raise HTTPException(400, f"No medicines to order for {m['name']}: scan the prescription, or check the flagged "
+                                 "lines against the paper first.")
     if (body.lat is None or body.lng is None) and not body.area.strip():
         raise HTTPException(400, "Share your location, or type the area.")
     photo = next((x.get("photo") for x in chosen if x.get("photo")), None)
@@ -1162,8 +1164,13 @@ async def tap(aid: str, body: Tap, request: Request):
 
 @api.post("/cards/{aid}/reject")
 def reject(aid: str, request: Request):
-    if not _st(request).store.reject(aid):
+    from app.core import photos
+    st = _st(request)
+    row = st.store.card(aid)
+    if not st.store.reject(aid):
         raise HTTPException(409, "This card was already handled.")
+    if row and row["card"]["kind"] == "meds":                 # a prescription nobody confirmed: its photo goes too
+        photos.delete(row["card"]["payload"].get("photo"))
     return {"ok": True}
 
 

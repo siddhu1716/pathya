@@ -65,6 +65,7 @@ def test_a_switch_of_language_is_told_to_the_model_once():
     assert f.note("నమస్కారం అండి") is None                                                      # still Telugu
     assert "speak only Hindi" in f.note("मैं स्विगी से बोल रहा हूँ") and f.note("ऑर्डर कहाँ लाऊँ?") is None
     assert "speak only Telugu" in f.note("సరే, వస్తున్నాను")
+    assert lang.Follow("Marathi").note("मला आज बरं वाटत आहे") is None                      # Devanagari, still Marathi
     app, store, _ = env()
     with TestClient(app) as c:
         from app.core.browser_call import Call

@@ -410,6 +410,19 @@ def test_photo_time_sets_the_meal_photos_are_kept_and_unclear_prescription_lines
     med = c.get("/api/family").json()["members"][1]["meds"][0]
     assert med["name_as_written"] == "Simvotin 10mg" and med["unclear"] and med["photo"] == r["photo"]   # kept as written
     assert M.today(store, "amma") == []                                                    # but never read out yet
+    health = c.app.state.experts["health"]
+    assert health.meds("amma") == []                                                       # nor on a check-in call
+    assert c.post("/api/health/pharmacy", json={"who": "amma", "area": "Madhapur"}).status_code == 400  # nor to a pharmacy
     assert c.put("/api/family/amma/meds/0", json={"times": []}).status_code == 400
     amma = c.put("/api/family/amma/meds/0", json={"times": ["night"]}).json()
     assert not amma["meds"][0]["unclear"] and amma["doses"][0]["meds"] == ["Simvotin 10mg one"]
+    assert [m["name_as_written"] for m in health.meds("amma")] == ["Simvotin 10mg"]
+    r = c.post("/api/scan", data={"who": "amma"}, files={"photo": ("rx.jpg", b"rx2", "image/jpeg")}).json()
+    assert c.get(f"/api/photos/{r['photo']}").status_code == 200
+    assert c.post(f"/api/cards/{r['card']}/reject").json()["ok"]
+    assert c.get(f"/api/photos/{r['photo']}").status_code == 404                          # skipped: photo deleted
+    r = c.post("/api/scan", data={"who": "amma"}, files={"photo": ("rx.jpg", b"rx3", "image/jpeg")}).json()
+    c.post(f"/api/cards/{r['card']}/tap", json={"choice": "discard"})
+    assert c.get(f"/api/photos/{r['photo']}").status_code == 404                          # discarded: deleted too
+    seen.update(kind="medicine", medicines=[{"name_as_printed": "X", "strength": None, "form": None, "unclear": False}])
+    assert "photo" not in c.post("/api/scan", data={"who": "amma"}, files={"photo": ("s.jpg", b"s", "image/jpeg")}).json()
