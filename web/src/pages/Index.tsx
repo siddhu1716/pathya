@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Camera, Download, Home, Loader2, Menu, Package, Smartphone, Users, UtensilsCrossed } from "lucide-react";
 import { toast } from "sonner";
@@ -199,8 +199,36 @@ function Account() {
   );
 }
 
+/** The header steps out of the way while you scroll down and comes back as soon as you scroll up. */
+function useHideOnScroll() {
+  const [hidden, setHidden] = useState(false);
+  const last = useRef(0);
+  useEffect(() => {
+    const onScroll = () => {
+      const y = window.scrollY;
+      if (Math.abs(y - last.current) > 6) setHidden(y > 72 && y > last.current);
+      last.current = y;
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+  return hidden;
+}
+
+/** First paint: the shape of Home, breathing, instead of a spinner. */
+function HomeSkeleton() {
+  return (
+    <div className="min-h-[100dvh] max-w-xl mx-auto px-4 pt-20 space-y-7" aria-label="Loading">
+      <div className="space-y-3"><div className="skeleton h-10 w-3/4" /><div className="skeleton h-4 w-1/2" /></div>
+      <div className="flex gap-3">{[0, 1, 2].map((i) => <div key={i} className="skeleton h-32 w-36 shrink-0" />)}</div>
+      <div className="grid grid-cols-2 gap-3">{[0, 1, 2, 3].map((i) => <div key={i} className="skeleton h-28" />)}</div>
+    </div>
+  );
+}
+
 const Index = () => {
   const [tab, setTab] = useState<Tab>("home");
+  const hideHeader = useHideOnScroll();
   const [member, setMember] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
   const { data: s, error } = useQuery({
@@ -209,9 +237,7 @@ const Index = () => {
   });
 
   if (!s) {
-    return error ? <Connect error={(error as Error).message} /> : (
-      <div className="min-h-[100dvh] flex items-center justify-center text-muted-foreground gap-2"><Loader2 className="animate-spin" /> Loading</div>
-    );
+    return error ? <Connect error={(error as Error).message} /> : <HomeSkeleton />;
   }
 
   const active = s.orders.filter((o) => !o.delivered && o.store !== "dry run");
@@ -222,7 +248,7 @@ const Index = () => {
 
   return (
     <div className="min-h-[100dvh] bg-background">
-      <header className="sticky top-0 z-40 bg-background/85 backdrop-blur border-b">
+      <header className={cn("sticky top-0 z-40 glass border-b hairline transition-transform duration-300 ease-out", hideHeader && "-translate-y-full")}>
         <div className="max-w-xl mx-auto px-4 h-14 flex items-center justify-between">
           <button className="flex items-center gap-2.5" onClick={() => go("home")}>
             <span className="w-7 h-7 rounded-md bg-primary text-primary-foreground flex items-center justify-center text-[13px] font-semibold">P</span>
@@ -240,7 +266,7 @@ const Index = () => {
       </header>
       <ScanSheet open={scanning} onClose={() => setScanning(false)} />
 
-      <main className="max-w-xl mx-auto px-4 pt-5 pb-28 space-y-7">
+      <main key={tab} className="max-w-xl mx-auto px-4 pt-6 pb-28 space-y-8 stagger">
         {s.live.map((c) => <LiveCallBanner key={c.id} call={c} />)}
         {s.ringing.map((j) => (
           <a key={j.id} href={`/call/${j.id}`} className="flex items-center gap-3 rounded-2xl border border-success/40 bg-success/5 px-4 py-3.5">
@@ -252,9 +278,17 @@ const Index = () => {
 
         {tab === "home" && (
           <>
-            <div className="space-y-1 px-1">
-              <h1 className="text-[26px] leading-tight font-medium tracking-tight">{hello}, {s.user}.</h1>
-              <p className="text-[15px] text-muted-foreground">The right food and care for everyone at home.</p>
+            <div className="space-y-2.5 px-1 pt-1">
+              <p className="label">{new Date().toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" })}</p>
+              <h1 className="display">
+                {`${hello}, ${s.user}.`.split(" ").map((w, i) => (
+                  <span key={i}><span className="word" style={{ animationDelay: `${120 + i * 70}ms` }}>{w}</span>{" "}</span>
+                ))}
+              </h1>
+              <p className="text-[15px] text-muted-foreground max-w-[30ch]">
+                {cards.length ? `${cards.length} ${cards.length === 1 ? "thing needs" : "things need"} you. Everything else is in hand.`
+                  : "The right food and care for everyone at home."}
+              </p>
             </div>
 
             <Section label="Family" right={<button className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground" onClick={() => go("family")}>All</button>}>
@@ -313,14 +347,16 @@ const Index = () => {
         )}
       </main>
 
-      <nav className="fixed bottom-0 inset-x-0 z-40 border-t bg-background/90 backdrop-blur pb-[env(safe-area-inset-bottom)]">
+      <nav className="fixed bottom-0 inset-x-0 z-40 border-t hairline glass pb-[env(safe-area-inset-bottom)]">
         <div className="max-w-xl mx-auto grid grid-cols-5">
           {TABS.map((t) => {
             const badge = t.id === "home" ? cards.length : t.id === "orders" ? active.length : 0;
             return (
               <button key={t.id} onClick={() => go(t.id)}
-                      className={cn("h-16 flex flex-col items-center justify-center gap-1 relative",
+                      className={cn("press h-16 flex flex-col items-center justify-center gap-1 relative",
                         tab === t.id ? "text-foreground" : "text-muted-foreground")}>
+                <span className={cn("absolute top-0 h-[2px] w-7 rounded-full bg-foreground transition-transform duration-300 ease-out",
+                  tab === t.id ? "scale-x-100" : "scale-x-0")} />
                 <t.icon className="w-5 h-5" strokeWidth={tab === t.id ? 2 : 1.5} />
                 <span className="font-mono text-[10px] uppercase tracking-wider">{t.label}</span>
                 {badge > 0 && (

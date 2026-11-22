@@ -7,7 +7,6 @@ household.yaml (pharmacies:) only after the tap, so Pathya still calls only numb
 import json
 import os
 import re
-import urllib.parse
 from pathlib import Path
 
 import yaml
@@ -34,11 +33,12 @@ the doctor. Do not place the order: say {user} will send the prescription on Wha
 details and never read out any ID. {no_advice}
 Call save_answer with what they said, then finish with end_call."""
 
-ORDER_YOURSELF = {
-    "Tata 1mg": "https://www.1mg.com/search/all?name={q}",
-    "Apollo 24|7": "https://www.apollopharmacy.in/search-medicines/{q}",
-    "PharmEasy": "https://pharmeasy.in/search/all?name={q}",
-}
+# Order every medicine at once: each app's own "order with prescription" page, where the family uploads the photo.
+ORDER_WITH_PRESCRIPTION = [
+    {"name": "Tata 1mg", "url": "https://www.1mg.com/attach-prescription"},
+    {"name": "Apollo 24|7", "url": "https://www.apollopharmacy.in/upload-prescription"},
+    {"name": "PharmEasy", "url": "https://pharmeasy.in/upload-rx"},
+]
 
 
 def search_name(med):
@@ -49,14 +49,11 @@ def search_name(med):
 
 
 def links(meds):
-    """Per medicine, a search link in each pharmacy app (the family orders there themselves)."""
-    out = []
-    for m in meds:
-        q = search_name(m)
-        if q:
-            out.append({"name": m.get("name_as_written"), "links": {k: v.format(q=urllib.parse.quote(q))
-                                                                    for k, v in ORDER_YOURSELF.items()}})
-    return out
+    """Order them all yourself: one link per pharmacy app (upload the prescription there), the prescription photo to
+    upload, and the medicines' names as one list to paste. No prices are fetched or compared."""
+    names = [search_name(m) for m in meds if not m.get("unclear")]
+    return {"apps": ORDER_WITH_PRESCRIPTION, "photo": next((m.get("photo") for m in meds if m.get("photo")), None),
+            "list": ", ".join(n for n in names if n)}
 
 
 def find(lat=None, lng=None, area="", city="Hyderabad", client=None):

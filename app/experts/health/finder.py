@@ -1,6 +1,8 @@
 """Finding a hospital or doctor the family named, and adding it to household.yaml once a human confirms.
 The web lookup only proposes a number with its source; Pathya calls it only after the human taps "Add" (which writes it
-into household.yaml, AGENTS.md rule 8: only numbers in household.yaml are called)."""
+into household.yaml, AGENTS.md rule 8: only numbers in household.yaml are called).
+Online consultations are links to the providers' own booking pages: their doctors' profiles stay on their sites
+(nothing is scraped or copied)."""
 import json
 import os
 import re
@@ -8,6 +10,15 @@ from pathlib import Path
 
 import yaml
 from openai import OpenAI
+
+ONLINE = [
+    {"name": "PharmEasy", "url": "https://pharmeasy.in/doctor-consultation/general-info?step=1",
+     "about": "Video consultation with a doctor, 20+ specialties, any time of day."},
+    {"name": "Apollo 24|7", "url": "https://www.apollo247.com/specialties",
+     "about": "Video, audio or chat consultation with Apollo doctors, by specialty."},
+]
+SPECIALTIES = ["General physician", "Diabetologist", "Cardiologist", "Orthopedic", "Gynecologist", "Dermatologist",
+               "Eye specialist", "ENT", "Pediatrician", "Dietitian"]
 
 FIND = """Find the appointment (reception) phone number for this place in India and return JSON only, no prose:
 {{"clinic": "<hospital or clinic name>", "doctor": "<doctor's name if found, else the one asked for>",
@@ -49,7 +60,8 @@ def add_to_household(path, hh, clinic):
     key, n = slug(clinic["clinic"]), 2
     while key in hh["clinics"]:
         key, n = f"{slug(clinic['clinic'])}-{n}", n + 1
-    entry = {"doctor": clinic.get("doctor") or "the doctor", "clinic": clinic["clinic"], "phone": clinic["phone_e164"]}
+    entry = {"doctor": clinic.get("doctor") or "the doctor", "clinic": clinic["clinic"], "phone": clinic["phone_e164"],
+             **({"specialty": clinic["specialty"]} if clinic.get("specialty") else {})}
     if path:
         p = Path(path)
         text = p.read_text(encoding="utf-8")

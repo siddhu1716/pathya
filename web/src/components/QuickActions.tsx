@@ -5,16 +5,11 @@ import { ArrowUp, Camera, Loader2, MessageCircle, PhoneCall, PhoneOutgoing, Shop
 import { Button } from "@/components/ui/button";
 import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } from "@/components/ui/drawer";
 import { Panel, Row } from "@/components/kit";
-import { useFamily } from "@/components/FamilyTab";
+import { DoctorSheet } from "@/components/Doctors";
 import { api, AppState, ringIn, setRingIn } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 const field = "w-full rounded-xl border bg-white/[0.03] px-3 py-2.5 text-[15px] outline-none focus:border-white/30";
-const day = (offset: number) => {
-  const d = new Date();
-  d.setDate(d.getDate() + offset);
-  return d.toISOString().slice(0, 10);
-};
 
 export function AskBox({ autoFocus = false, onDone }: { autoFocus?: boolean; onDone?: () => void }) {
   const qc = useQueryClient();
@@ -46,8 +41,8 @@ type Sheet = null | "groceries" | "doctor" | "ask";
 function Tile({ icon: Icon, title, sub, onClick, disabled }: { icon: typeof Camera; title: string; sub: string; onClick: () => void; disabled?: boolean }) {
   return (
     <button onClick={onClick} disabled={disabled}
-            className="rounded-2xl border bg-card p-4 text-left space-y-3 active:bg-white/5 disabled:opacity-40 transition-smooth">
-      <span className="w-9 h-9 rounded-full border flex items-center justify-center"><Icon className="w-4 h-4" /></span>
+            className="press rounded-2xl border bg-card/80 p-4 text-left space-y-4 disabled:opacity-40">
+      <span className="w-10 h-10 rounded-xl border bg-white/[0.04] flex items-center justify-center"><Icon className="w-[18px] h-[18px]" strokeWidth={1.6} /></span>
       <span className="block">
         <span className="block text-[15px] leading-tight">{title}</span>
         <span className="block text-[12px] text-muted-foreground mt-0.5 leading-snug">{sub}</span>
@@ -73,14 +68,14 @@ export function QuickActions({ state, onScan, onMeals }: { state: AppState; onSc
         <Tile icon={ShoppingBasket} title="Groceries" sub={stores ? (state.swiggy ? "Instamart cart, one tap" : "Zepto cart, one tap") : "Stores offline"}
               onClick={() => setSheet("groceries")} />
         <Tile icon={UtensilsCrossed} title="Meal plan" sub="A plate for everyone" onClick={onMeals} />
-        <Tile icon={Stethoscope} title="Book a doctor" sub="Pathya calls and books" onClick={() => setSheet("doctor")} />
+        <Tile icon={Stethoscope} title="Book a doctor" sub="Your doctors, nearby or online" onClick={() => setSheet("doctor")} />
         <Tile icon={MessageCircle} title="Ask Pathya" sub="Say it in one sentence" onClick={() => setSheet("ask")} />
       </div>
       <Drawer open={sheet !== null} onOpenChange={(o) => !o && setSheet(null)}>
         <DrawerContent className="bg-card border-t max-h-[90dvh]">
           <div className="overflow-y-auto">
             {sheet === "groceries" && <Groceries state={state} done={done} fail={fail} />}
-            {sheet === "doctor" && <Doctor state={state} done={done} fail={fail} />}
+            {sheet === "doctor" && <DoctorSheet state={state} done={done} fail={fail} />}
             {sheet === "ask" && (
               <div className="p-4 pb-8 space-y-3">
                 <DrawerHeader className="px-0 text-left">
@@ -119,89 +114,6 @@ function Groceries({ state, done, fail }: { state: AppState; done: (m: string) =
                disabled={callList.isPending} onClick={() => callList.mutate(p.key)} />
         ))}
       </Panel>
-    </div>
-  );
-}
-
-function Doctor({ state, done, fail }: { state: AppState; done: (m: string) => void; fail: (e: Error) => void }) {
-  const { data: fam } = useFamily();
-  const members = fam?.members ?? [];
-  const [mode, setMode] = useState<"plan" | "known">("plan");
-  const [caller, setCaller] = useState("me");
-  const intake = useMutation({ mutationFn: () => api.intake(caller), onSuccess: () => done("Calling to plan the appointment"), onError: fail });
-  const [f, setF] = useState({ patient: "me", place: state.clinics[0]?.key ?? "other", hospital: "", doctor: "", area: "",
-    reason: "", from: day(1), to: day(7), part: "morning" });
-  const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setF({ ...f, [k]: e.target.value });
-  const saved = f.place !== "other";
-  const book = useMutation({
-    mutationFn: async (): Promise<unknown> => saved
-      ? api.book({ patient: f.patient, clinic: f.place, window_start: `${f.from}T00:00`, window_end: `${f.to}T23:59`, part: f.part, reason: f.reason || "consultation" })
-      : api.bookRequest({ patient: f.patient, hospital: f.hospital, doctor: f.doctor, area: f.area, reason: f.reason, from_date: f.from, to_date: f.to, part: f.part }),
-    onSuccess: () => done(saved ? "Calling the clinic" : "Card on Home: Pathya finds the number, you confirm"),
-    onError: fail,
-  });
-  return (
-    <div className="p-4 pb-8 space-y-3">
-      <DrawerHeader className="px-0 text-left">
-        <DrawerTitle className="font-medium">Book a doctor</DrawerTitle>
-        <DrawerDescription>Pathya phones the clinic and books only inside your days and times. It never diagnoses.</DrawerDescription>
-      </DrawerHeader>
-      <div className="grid grid-cols-2 rounded-full border p-0.5">
-        {([["plan", "Pathya plans it"], ["known", "I know where"]] as const).map(([id, label]) => (
-          <button key={id} onClick={() => setMode(id)} className={cn("h-9 rounded-full text-[14px]", mode === id ? "bg-primary text-primary-foreground" : "text-muted-foreground")}>{label}</button>
-        ))}
-      </div>
-      {mode === "plan" ? (
-        <div className="space-y-3">
-          <p className="text-[14px] text-muted-foreground">
-            Pathya calls, asks who it's for, the reason in their words, a hospital or area, and good days. Then it finds the clinic
-            and shows you a card; it phones the clinic only after your tap.
-          </p>
-          <div className="flex flex-wrap gap-2">
-            {members.filter((m) => m.has_phone).map((m) => (
-              <button key={m.key} onClick={() => setCaller(m.key)}
-                      className={cn("px-3 h-9 rounded-full border text-[14px]", caller === m.key ? "bg-primary text-primary-foreground border-primary" : "text-muted-foreground")}>
-                Call {m.key === "me" ? "me" : m.name}
-              </button>
-            ))}
-          </div>
-          <Button className="w-full h-12" disabled={intake.isPending} onClick={() => intake.mutate()}>
-            {intake.isPending && <Loader2 className="animate-spin" />} Start the call
-          </Button>
-        </div>
-      ) : (
-        <form className="space-y-2" onSubmit={(e) => { e.preventDefault(); book.mutate(); }}>
-          <div className="grid grid-cols-2 gap-2">
-            <select className={field} value={f.patient} onChange={set("patient")}>
-              {members.map((m) => <option key={m.key} value={m.key}>{m.key === "me" ? `${m.name} (me)` : m.name}</option>)}
-            </select>
-            <select className={field} value={f.place} onChange={set("place")}>
-              {state.clinics.map((c) => <option key={c.key} value={c.key}>{c.doctor}</option>)}
-              <option value="other">Somewhere else…</option>
-            </select>
-          </div>
-          {!saved && (
-            <>
-              <input className={field} value={f.hospital} onChange={set("hospital")} placeholder="Hospital or clinic (Yashoda, Apollo …)" />
-              <div className="grid grid-cols-2 gap-2">
-                <input className={field} value={f.doctor} onChange={set("doctor")} placeholder="Doctor (optional)" />
-                <input className={field} value={f.area} onChange={set("area")} placeholder="Area (Somajiguda)" />
-              </div>
-            </>
-          )}
-          <input className={field} value={f.reason} onChange={set("reason")} placeholder="Reason, in your words (BP review, knee pain)" />
-          <div className="grid grid-cols-3 gap-2">
-            <input className={field} type="date" value={f.from} onChange={set("from")} />
-            <input className={field} type="date" value={f.to} onChange={set("to")} />
-            <select className={field} value={f.part} onChange={set("part")}>
-              {["morning", "afternoon", "evening", "any"].map((p) => <option key={p}>{p}</option>)}
-            </select>
-          </div>
-          <Button type="submit" className="w-full h-12" disabled={book.isPending || (!saved && !f.hospital.trim() && !f.doctor.trim())}>
-            {book.isPending && <Loader2 className="animate-spin" />} {saved ? "Phone the clinic" : "Find it and ask me first"}
-          </Button>
-        </form>
-      )}
     </div>
   );
 }

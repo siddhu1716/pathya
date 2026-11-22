@@ -105,7 +105,8 @@ export type CallRecord = {
 };
 
 export type Person = { key: string; name: string; role: string; language: string };
-export type Clinic = { key: string; doctor: string; clinic: string };
+export type Clinic = { key: string; doctor: string; clinic: string; specialty: string; phone_hint: string | null; sees: string[] };
+export type Doctors = { saved: Clinic[]; specialties: string[]; online: { name: string; url: string; about: string }[] };
 
 export type AppState = {
   dry_run: boolean;
@@ -231,7 +232,10 @@ export const api = {
   signOut: () => post<{ ok: boolean }>("/api/auth/signout"),
   findPharmacy: (b: { who: string; lat?: number; lng?: number; area?: string; meds?: number[]; via?: string }) =>
     post<{ searching: boolean; medicines: number }>("/api/health/pharmacy", b),
-  pharmacyLinks: (who: string) => request<{ name: string; links: Record<string, string> }[]>(`/api/health/pharmacy/links?who=${encodeURIComponent(who)}`),
+  pharmacyLinks: (who: string) =>
+    request<{ apps: { name: string; url: string }[]; photo: string | null; list: string }>(`/api/health/pharmacy/links?who=${encodeURIComponent(who)}`),
+  doctors: () => request<Doctors>("/api/doctors"),
+  addDoctor: (d: { doctor: string; clinic: string; phone: string; specialty: string }) => post<Clinic>("/api/doctors", d),
   reminders: (k: string, on: boolean) => post<{ ok: boolean }>(`/api/family/${k}/reminders`, { on }),
   callMember: (k: string) => post<{ job: string }>(`/api/family/${k}/call${via()}`),
   dailyMember: (k: string, hour: number | null) => post<{ ok: boolean }>(`/api/family/${k}/daily`, { hour }),

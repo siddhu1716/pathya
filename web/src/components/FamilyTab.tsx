@@ -583,14 +583,14 @@ export function FamilyStrip({ onOpen }: { onOpen: (key: string) => void }) {
   const { data: fam } = useFamily();
   if (!fam) return null;
   return (
-    <div className="flex gap-3 overflow-x-auto snap-x -mx-4 px-4 pb-1">
+    <div className="flex gap-3 overflow-x-auto snap-x -mx-4 px-4 pb-1 no-scrollbar">
       {fam.members.map((m) => {
         const tone = doseTone(m.doses);
         const pending = m.doses.filter((d) => !d.taken && d.hour <= new Date().getHours()).length;
         const today = pctOf(m.today.total.kcal, m.today.targets.kcal);
         return (
           <button key={m.key} onClick={() => onOpen(m.key)}
-                  className="snap-start shrink-0 w-[9.5rem] rounded-2xl border bg-card p-3 text-left space-y-2.5 active:bg-white/5">
+                  className="press snap-start shrink-0 w-[9.5rem] rounded-2xl border bg-card/80 p-3 text-left space-y-2.5">
             <div className="flex items-center justify-between">
               <Ring value={m.health.score} size={40} />
               {tone && <span className="flex items-center gap-1 font-mono text-[10px] text-muted-foreground"><Dot tone={tone} />{pending ? `${pending} dose` : "meds"}</span>}

@@ -70,10 +70,14 @@ and turns what is missing into a Swiggy Instamart cart you approve with one tap.
   Tap it for the breakdown and what would raise it. Readings and weight never count; it is not a medical test.
 - **Goal bars:** every target shows the percentage reached. Bulk or cut with a goal weight shows how far along it is.
 - **Parents:** the evening check-in call is on by default for parents and members 60+ with a phone.
-- **Book a doctor:** two ways.
-  - "Pathya plans it": Pathya calls you, asks who it's for, the reason in their words, the place and the days, and
-    shows a card.
-  - "I know where": type the hospital or doctor.
+- **Book a doctor:**
+  - "Doctors": your doctors as profiles (specialty, clinic, who in the family sees them). Tap Book, pick who, the week
+    and the time of day, and Pathya phones the clinic. "Add a doctor" saves one into `household.yaml`.
+  - "Find a specialist near you": pick a specialty (or name a hospital) and the area.
+  - "Plan by call": Pathya calls you, asks who it's for, the reason in their words, the place and the days, and shows
+    a card.
+  - "Online now": PharmEasy and Apollo 24|7 online consultations open on their own sites (their doctors and fees stay
+    there; nothing is copied).
 
   A clinic that isn't saved yet is looked up on the web (number and source shown). It is added to `household.yaml`
   and phoned only after your tap.
@@ -85,11 +89,16 @@ and turns what is missing into a Swiggy Instamart cart you approve with one tap.
     have, the total and home delivery. It reads the names exactly as written, never accepts a substitute and never
     orders;
   - the result card opens WhatsApp with the list and shares the prescription photo, so you place the order;
-  - or open each medicine in Tata 1mg, Apollo 24|7 or PharmEasy yourself (their own search; no prices fetched).
+  - or order them all yourself: one tap opens Tata 1mg, Apollo 24|7 or PharmEasy's "order with prescription" page
+    to upload the prescription photo (no prices fetched).
 - **Sign in:** with your phone number and a code by SMS or a voice call (Twilio Verify). Only the user's and family
   members' numbers in `household.yaml` can sign in. The `?key=` link still works.
 
 Pathya never diagnoses and never suggests, starts, stops or changes a medicine or dose (see [AGENTS.md](AGENTS.md)).
+
+UI: dark, minimal and phone-first. Motion uses only transform and opacity and stops for "reduce motion"; there is no
+glow. It follows the parts of the premium-frontend-ui Copilot skill that suit a phone app: type scale, staggered
+entrances, press feedback, frosted bars, grain and skeleton loading.
 
 ## Run
 

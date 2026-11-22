@@ -136,7 +136,7 @@ def state(request: Request):
         "daily_call": getattr(st.experts.get("home"), "daily_hour", lambda: None)(),
         "people": [{"key": k, "name": v["name"], "role": v.get("role", ""), "language": lang_of(hh, v)}
                    for k, v in hh["people"].items()],
-        "clinics": [{"key": k, "doctor": v["doctor"], "clinic": v["clinic"]} for k, v in hh["clinics"].items()],
+        "clinics": [_doctor_view(hh, k, v) for k, v in hh["clinics"].items()],
         "cards": waiting,
         "recent": store.recent_cards(),
         "jobs": store.upcoming(),
@@ -1098,9 +1098,55 @@ async def health_pharmacy(body: PharmacyFind, request: Request):
     return {"searching": True, "medicines": len(meds)}
 
 
+def _doctor_view(hh, key, c):
+    """A saved doctor's profile for the app: who in the family sees them, and only the end of the number."""
+    sees = [p["name"] for p in hh["people"].values() if p.get("clinic") == key] + \
+        (["You"] if hh["user"].get("clinic") == key else [])
+    return {"key": key, "doctor": c.get("doctor") or "", "clinic": c.get("clinic") or "", "specialty": c.get("specialty") or "",
+            "phone_hint": f"…{_digits(c.get('phone'))[-4:]}" if c.get("phone") else None, "sees": sees}
+
+
+@api.get("/doctors")
+def doctors(request: Request):
+    """Book a doctor: the family's own doctors (household.yaml), specialties to search near you, and online
+    consultations (links to the providers' own booking pages)."""
+    from app.experts.health import finder
+    hh = _st(request).household
+    return {"saved": [_doctor_view(hh, k, v) for k, v in hh["clinics"].items()], "specialties": finder.SPECIALTIES,
+            "online": finder.ONLINE}
+
+
+class DoctorIn(BaseModel):
+    doctor: str
+    clinic: str
+    phone: str
+    specialty: str = ""
+
+
+@api.post("/doctors")
+def doctor_add(body: DoctorIn, request: Request):
+    """The family adds a doctor they know: written into household.yaml (clinics:), so Pathya may phone them (rule 8)."""
+    from app.experts.health import finder
+    st = _st(request)
+    path = getattr(st, "household_path", None)
+    number = finder.e164(body.phone)
+    if not body.doctor.strip() or not body.clinic.strip():
+        raise HTTPException(400, "Add the doctor's name and the clinic or hospital.")
+    if not number:
+        raise HTTPException(400, "That phone number doesn't look right (an Indian mobile or landline with area code).")
+    if not path:
+        raise HTTPException(503, "household.yaml is not available to edit.")
+    key = finder.add_to_household(path, st.household, {"doctor": body.doctor.strip()[:60], "clinic": body.clinic.strip()[:80],
+                                                       "phone_e164": number, "specialty": body.specialty.strip()[:40],
+                                                       "source": "added by the family in the app"})
+    st.store.log("health", key, f"doctor added: {body.doctor.strip()[:60]}, {body.clinic.strip()[:80]}")
+    return _doctor_view(st.household, key, st.household["clinics"][key])
+
+
 @api.get("/health/pharmacy/links")
 def health_pharmacy_links(request: Request, who: str = "me"):
-    """Order it yourself: a search link per medicine in Tata 1mg, Apollo 24|7 and PharmEasy (no prices fetched)."""
+    """Order them all yourself: Tata 1mg, Apollo 24|7 and PharmEasy's "order with prescription" pages, with the
+    prescription photo to upload (no prices fetched)."""
     from app.experts.family import meds as M
     from app.experts.health import pharmacy
     _member(request, who)

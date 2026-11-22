@@ -182,9 +182,14 @@ def test_booking_saved_clinic_or_find_then_add_to_household(tmp_path, monkeypatc
     monkeypatch.setattr(finder, "find_clinic", lambda *a, **k: {"clinic": "CARE Hospitals Banjara Hills", "doctor": "Dr. Kumar",
                                                               "phone": "040 6165 6565", "phone_e164": "+914061656565",
                                                               "address": "Road No. 1", "source": "https://example.org"})
-    out = asyncio.run(h.execute(new.to_dict(), "find"))
+    async def find_now():
+        out = await h.execute(new.to_dict(), "find")
+        await asyncio.gather(*h.background)                                           # the search runs in the background
+        return out
+    out = asyncio.run(find_now())
     found = store.cards()[0]["card"]
-    assert out["ok"] and found["kind"] == "clinic" and "Phone: 040 6165 6565" in found["lines"]
+    assert out["ok"] and "about a minute" in out["message"]
+    assert found["kind"] == "clinic" and "Phone: 040 6165 6565" in found["lines"]
     assert not any(c.get("phone") == "+914061656565" for c in hh["clinics"].values())     # nothing added before the tap
     added = asyncio.run(h.execute(found, "add"))
     text = yml.read_text(encoding="utf-8")

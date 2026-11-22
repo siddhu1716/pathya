@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { ChevronRight, X } from "lucide-react";
 import { api } from "@/lib/api";
@@ -19,7 +19,7 @@ export function Section({ label, right, children, className }: {
 }
 
 export function Panel({ children, className }: { children: React.ReactNode; className?: string }) {
-  return <div className={cn("rounded-2xl border bg-card", className)}>{children}</div>;
+  return <div className={cn("rounded-2xl border bg-card/80", className)}>{children}</div>;
 }
 
 export function Row({ icon: Icon, title, sub, right, onClick, disabled }: {
@@ -28,8 +28,8 @@ export function Row({ icon: Icon, title, sub, right, onClick, disabled }: {
 }) {
   return (
     <button onClick={onClick} disabled={disabled}
-            className="w-full flex items-center gap-3 px-4 py-3.5 text-left active:bg-white/5 disabled:opacity-40 transition-smooth">
-      <span className="w-9 h-9 rounded-full border flex items-center justify-center shrink-0">
+            className="press w-full flex items-center gap-3 px-4 py-3.5 text-left active:bg-white/5 disabled:opacity-40">
+      <span className="w-9 h-9 rounded-full border bg-white/[0.03] flex items-center justify-center shrink-0">
         <Icon className="w-4 h-4" />
       </span>
       <span className="flex-1 min-w-0">
@@ -44,14 +44,16 @@ export function Row({ icon: Icon, title, sub, right, onClick, disabled }: {
 /** A progress ring: the health score (or any 0-100). */
 export function Ring({ value, size = 44, stroke = 4, className }: { value: number | null; size?: number; stroke?: number; className?: string }) {
   const r = (size - stroke) / 2, c = 2 * Math.PI * r;
-  const pct = value == null ? 0 : Math.max(0, Math.min(100, value));
+  const [shown, setShown] = useState(false);                     // fills up from empty on first paint
+  useEffect(() => { const id = requestAnimationFrame(() => setShown(true)); return () => cancelAnimationFrame(id); }, []);
+  const pct = value == null || !shown ? 0 : Math.max(0, Math.min(100, value));
   const color = value == null ? "stroke-white/20" : pct >= 80 ? "stroke-success" : pct >= 60 ? "stroke-foreground" : "stroke-warning";
   return (
     <span className={cn("relative inline-flex items-center justify-center shrink-0", className)} style={{ width: size, height: size }}>
       <svg width={size} height={size} className="-rotate-90">
         <circle cx={size / 2} cy={size / 2} r={r} strokeWidth={stroke} className="stroke-white/10 fill-none" />
         <circle cx={size / 2} cy={size / 2} r={r} strokeWidth={stroke} strokeLinecap="round" className={cn("fill-none transition-all duration-700", color)}
-                strokeDasharray={c} strokeDashoffset={c * (1 - pct / 100)} />
+                strokeDasharray={c} strokeDashoffset={c * (1 - pct / 100)} style={{ transitionTimingFunction: "cubic-bezier(0.2, 0.7, 0.2, 1)" }} />
       </svg>
       <span className="absolute font-mono tabular-nums" style={{ fontSize: size * 0.3 }}>{value ?? "–"}</span>
     </span>

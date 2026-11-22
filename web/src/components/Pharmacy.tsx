@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Loader2, LocateFixed, Search } from "lucide-react";
+import { ArrowUpRight, Download, Loader2, LocateFixed, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } from "@/components/ui/drawer";
 import { api, Member, ringIn } from "@/lib/api";
@@ -82,22 +82,35 @@ export function PharmacySheet({ m, open, onClose }: { m: Member; open: boolean; 
             </form>
           </div>
 
-          {!!links?.length && (
+          {links && (
             <div className="space-y-2">
-              <h3 className="label px-1">Or order yourself</h3>
-              <div className="rounded-2xl border divide-y">
-                {links.filter((l) => picked.some((i) => m.meds[i]?.name_as_written === l.name)).map((l) => (
-                  <div key={l.name} className="px-4 py-3 space-y-1.5">
-                    <p className="text-[14px] truncate">{l.name}</p>
-                    <div className="flex gap-2">
-                      {Object.entries(l.links).map(([site, url]) => (
-                        <a key={site} href={url} target="_blank" rel="noreferrer" className="h-8 px-3 rounded-full border text-[12px] flex items-center text-muted-foreground">{site}</a>
-                      ))}
-                    </div>
-                  </div>
-                ))}
+              <h3 className="label px-1">Or order all of them yourself</h3>
+              <div className="rounded-2xl border p-4 space-y-3">
+                <p className="text-[13px] text-muted-foreground">
+                  Open a pharmacy app's "order with prescription" page and upload the prescription photo: they deliver every medicine on it.
+                </p>
+                {links.photo && (
+                  <a href={api.photoUrl(links.photo)} download="prescription.jpg"
+                     className="press h-11 rounded-xl border flex items-center justify-center gap-2 text-[14px]">
+                    <Download className="w-4 h-4" /> Save the prescription photo
+                  </a>
+                )}
+                <div className="grid grid-cols-3 gap-2">
+                  {links.apps.map((a) => (
+                    <a key={a.name} href={a.url} target="_blank" rel="noreferrer"
+                       className="press h-11 rounded-xl bg-white/[0.04] border flex items-center justify-center gap-1 text-[13px]">
+                      {a.name} <ArrowUpRight className="w-3.5 h-3.5 text-muted-foreground" />
+                    </a>
+                  ))}
+                </div>
+                {links.list && (
+                  <button type="button" className="w-full text-left text-[12px] text-muted-foreground"
+                          onClick={() => navigator.clipboard?.writeText(links.list).then(() => toast.success("List copied")).catch(() => undefined)}>
+                    No photo handy? Tap to copy the list: <span className="text-foreground/80">{links.list}</span>
+                  </button>
+                )}
               </div>
-              <p className="text-[12px] text-muted-foreground px-1">Opens each app's own search. Pathya does not fetch or compare prices.</p>
+              <p className="text-[12px] text-muted-foreground px-1">Pathya does not fetch or compare prices.</p>
             </div>
           )}
         </div>

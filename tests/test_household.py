@@ -128,7 +128,8 @@ def test_pharmacy_found_near_you_is_added_only_after_a_tap_and_the_call_never_or
         r["card"] = found[0]["id"]
         assert "apollo" not in path.read_text(encoding="utf-8").lower()                          # nothing added yet
         links = c.get("/api/health/pharmacy/links?who=amma").json()
-        assert links[0]["links"]["Tata 1mg"] == "https://www.1mg.com/search/all?name=Simvotin%2010mg"
+        assert [a["name"] for a in links["apps"]] == ["Tata 1mg", "Apollo 24|7", "PharmEasy"]   # one link each, for all
+        assert links["list"] == "Simvotin 10mg"
         out = c.post(f"/api/cards/{r['card']}/tap", json={"choice": "call:0"}).json()["result"]
         data = yaml.safe_load(path.read_text(encoding="utf-8"))
         assert data["pharmacies"]["apollo-pharmacy-madhapur"]["phone"] == "+914023112345"       # rule 8: listed first
@@ -146,3 +147,29 @@ def test_pharmacy_found_near_you_is_added_only_after_a_tap_and_the_call_never_or
     assert card.payload["safety"] == "unchecked"                                                # passed safety.check
     assert pharmacy.add_to_household(str(path), hh, {"name": "Apollo again", "phone_e164": "+914023112345"}) == \
         "apollo-pharmacy-madhapur"                                                                  # same number: reused
+
+
+def test_family_adds_a_doctor_profile_and_books_from_it(tmp_path):
+    app, store, _ = env()
+    path = tmp_path / "household.yaml"
+    path.write_text(YAML, encoding="utf-8")
+    app.state.household = hh = yaml.safe_load(YAML)
+    hh["people"]["amma"]["clinic"] = "rao"
+    for e in app.state.experts.values():
+        e.hh = hh
+    app.state.household_path = str(path)
+    with TestClient(app) as c:
+        d = c.get("/api/doctors").json()
+        assert d["saved"][0]["sees"] == ["Amma"] and d["saved"][0]["phone_hint"] == "…0003" and "phone" not in d["saved"][0]
+        assert {o["name"] for o in d["online"]} == {"PharmEasy", "Apollo 24|7"} and "Diabetologist" in d["specialties"]
+        assert c.post("/api/doctors", json={"doctor": "Dr. Meera", "clinic": "Care", "phone": "12"}).status_code == 400
+        new = c.post("/api/doctors", json={"doctor": "Dr. Meera Rao", "clinic": "Care Clinic, Madhapur",
+                                          "phone": "040 2311 2345", "specialty": "Diabetologist"}).json()
+        assert new["specialty"] == "Diabetologist" and new["phone_hint"] == "…2345"
+        saved = yaml.safe_load(path.read_text(encoding="utf-8"))["clinics"][new["key"]]
+        assert saved == {"doctor": "Dr. Meera Rao", "clinic": "Care Clinic, Madhapur", "phone": "+914023112345",
+                         "specialty": "Diabetologist"}                                          # rule 8: listed first
+        assert any(x["specialty"] == "Diabetologist" for x in c.get("/api/state").json()["clinics"])
+        job = c.post("/api/health/book", json={"patient": "amma", "clinic": new["key"], "window_start": "2026-12-01T00:00",
+                                               "window_end": "2026-12-03T23:59", "part": "morning", "reason": "sugar review"}).json()
+        assert store.job(job["job"])["payload"]["to"] == "+914023112345"

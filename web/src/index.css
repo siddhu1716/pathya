@@ -117,3 +117,61 @@
     @apply font-mono text-[11px] uppercase tracking-[0.08em] text-muted-foreground;
   }
 }
+
+/* Premium layer (skills/premium-frontend-ui, adapted for a phone app used by elders): motion animates only transform
+   and opacity, nothing moves for people who ask for reduced motion, no glow anywhere. */
+@layer components {
+  @keyframes rise {
+    from { opacity: 0; transform: translate3d(0, 10px, 0); }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes word-in {
+    from { opacity: 0; transform: translate3d(0, 0.4em, 0); }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes breathe {
+    0%, 100% { opacity: 0.45; }
+    50% { opacity: 0.8; }
+  }
+
+  .rise { animation: rise 0.45s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+  .stagger > * { animation: rise 0.5s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+  .stagger > *:nth-child(2) { animation-delay: 45ms; }
+  .stagger > *:nth-child(3) { animation-delay: 90ms; }
+  .stagger > *:nth-child(4) { animation-delay: 135ms; }
+  .stagger > *:nth-child(5) { animation-delay: 180ms; }
+  .stagger > *:nth-child(6) { animation-delay: 225ms; }
+  .stagger > *:nth-child(n + 7) { animation-delay: 270ms; }
+  .word { display: inline-block; animation: word-in 0.6s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+
+  /* Tactile press: things you tap give a little. Hover only where there is a real pointer. */
+  .press { transition: transform 0.16s cubic-bezier(0.2, 0.7, 0.2, 1), background-color 0.16s, border-color 0.16s; }
+  .press:active { transform: scale(0.97); }
+  @media (hover: hover) and (pointer: fine) {
+    .press:hover { background-color: hsl(var(--card-hover)); border-color: rgb(255 255 255 / 0.14); }
+  }
+
+  .display { font-size: clamp(30px, 8.6vw, 44px); line-height: 1.04; letter-spacing: -0.035em; font-weight: 500; }
+  .glass { background-color: hsl(var(--background) / 0.72); backdrop-filter: blur(18px) saturate(140%); -webkit-backdrop-filter: blur(18px) saturate(140%); }
+  .hairline { border-color: rgb(255 255 255 / 0.07); }
+  .skeleton { border-radius: 1rem; background-color: hsl(0 0% 8%); animation: breathe 1.4s ease-in-out infinite; }
+  .no-scrollbar { scrollbar-width: none; }
+  .no-scrollbar::-webkit-scrollbar { display: none; }
+}
+
+/* Film grain over the flat black, so the dark reads as a surface rather than a void. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  pointer-events: none;
+  opacity: 0.04;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rise, .stagger > *, .word, .skeleton, .fade-in, .slide-up { animation: none !important; }
+  .press:active { transform: none; }
+}

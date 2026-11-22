@@ -109,6 +109,7 @@ class HealthExpert(Expert):
 
     def __init__(self, store, household, path=None):
         self.store, self.hh, self.path = store, household, path      # path: household.yaml, for clinics a human adds
+        self.background = set()                                      # clinic searches still running
 
     def person(self, key):
         """A household member, the user themself ("me"), or a member added in the app (no phone)."""
@@ -385,20 +386,13 @@ class HealthExpert(Expert):
                 r.get("reason") or "consultation")]}
         if kind == "bookreq" and choice == "find":
             import asyncio
-            from app.experts.health import finder
             r = p["request"]
-            found = await asyncio.to_thread(finder.find_clinic, r.get("hospital"), r.get("doctor"), r.get("area"),
-                                            self.hh.get("city", "Hyderabad"))
-            if not found.get("phone_e164"):
-                return {"ok": False, "error": f"No phone number found for {found.get('clinic') or r.get('hospital')}. "
-                                              "Add it in household.yaml under clinics, or try another name."}
-            self.store.add_card(Card(self.name, "clinic", f"Found: {found['clinic']}",
-                                     [found.get("doctor") or "", f"Phone: {found.get('phone')}", found.get("address") or "",
-                                      f"Source: {found.get('source') or 'web search'}"],
-                                     question="Add it to your clinics (household.yaml) and phone them to book?",
-                                     choices=[{"id": "add", "label": "Add and phone them"}],
-                                     payload={"request": r, "found": found}).to_dict())
-            return {"ok": True, "message": f"Found {found['clinic']}. Check the new card before Pathya calls."}
+            task = asyncio.create_task(self._find_and_propose(r))      # a careful web search: about a minute
+            self.background.add(task)
+            task.add_done_callback(self.background.discard)
+            what = " · ".join(x for x in (r.get("hospital"), r.get("doctor"), r.get("area")) if x) or "a clinic"
+            return {"ok": True, "message": f"Looking up {what} on the web. A card with the number appears on Home in "
+                                           "about a minute; Pathya phones them only after your tap."}
         if kind == "clinic" and choice == "add":
             from app.experts.health import finder
             r = p["request"]
@@ -448,6 +442,31 @@ class HealthExpert(Expert):
         if kind == "pharmacy_answer" and choice == "whatsapp":
             return {"ok": True, "open": p.get("wa")}
         return {"ok": True}
+
+    # ---- medicines from a pharmacy (app/experts/health/pharmacy.py) ----
+    async def _find_and_propose(self, r):
+        """The web search for a clinic the family named (or a specialist near them): a card with the number and its
+        source. Nothing is added to household.yaml, and nobody is called, before the family taps."""
+        import asyncio
+        from app.experts.health import finder
+        try:
+            found = await asyncio.to_thread(finder.find_clinic, r.get("hospital"), r.get("doctor"), r.get("area"),
+                                            self.hh.get("city", "Hyderabad"))
+        except Exception as err:
+            found = {"error": str(err)[:200]}
+        if not found.get("phone_e164"):
+            what = found.get("clinic") or r.get("hospital") or r.get("doctor") or "that clinic"
+            self.store.add_card(Card(self.name, "info", f"No number found for {what}"[:80],
+                                     [found.get("error") or "The search found no listed phone number.",
+                                      "Try another name or area, or add the doctor yourself in Book a doctor."],
+                                     question="", choices=[{"id": "ok", "label": "OK"}]).to_dict())
+            return None
+        return self.store.add_card(Card(self.name, "clinic", f"Found: {found['clinic']}",
+                                        [found.get("doctor") or "", f"Phone: {found.get('phone')}", found.get("address") or "",
+                                         f"Source: {found.get('source') or 'web search'}"],
+                                        question="Add it to your clinics (household.yaml) and phone them to book?",
+                                        choices=[{"id": "add", "label": "Add and phone them"}],
+                                        payload={"request": r, "found": found}).to_dict())
 
     # ---- medicines from a pharmacy (app/experts/health/pharmacy.py) ----
     def address(self):
