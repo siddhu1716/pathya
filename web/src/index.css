@@ -176,7 +176,16 @@
   .display span { color: #e0edbc; }
   .hero-description { max-width: 37ch; color: #e0e5d8; font-size: clamp(.9rem, 1.5vw, 1.05rem); }
   .hero-controls { display: flex; align-items: center; gap: .85rem; flex-wrap: wrap; margin-top: 1.1rem; }
-  .hero-controls > span { color: #e0e5d8; font-size: .85rem; }
+  .call-languages { color: #e0e5d8; font-size: .95rem; line-height: 1.65; }
+  /* Stack all phrases in one cell so the call button stays still across scripts. */
+  .language-words { display: inline-grid; vertical-align: middle; }
+  .language-words > span { grid-area: 1 / 1; visibility: hidden; }
+  .language-words > :first-child { visibility: visible; }
+  @keyframes language-fade {
+    0% { opacity: 0; transform: translateY(.15em); }
+    12%, 86% { opacity: 1; transform: none; }
+    100% { opacity: 0; transform: translateY(-.15em); }
+  }
   .call-action {
     @apply inline-flex min-h-11 items-center gap-2 rounded-full bg-primary px-5 font-semibold text-primary-foreground;
     transition: background-color .15s, transform .15s;
@@ -249,6 +258,11 @@
     .hero-thali { width: 49%; right: -15%; }
   }
   @media (prefers-reduced-motion: no-preference) {
+    .language-words { animation: language-fade 3.2s ease-in-out infinite; }
+    .language-words > [data-current="false"] { visibility: hidden; }
+    .language-words > [data-current="true"] { visibility: visible; }
+    .hero-controls:focus-within .language-words,
+    .call-languages:hover .language-words { animation-play-state: paused; }
     .page-content, .rise, .stagger > * { animation: fade-in .18s ease-out; }
     .skeleton { animation: soft-pulse 1.8s ease-in-out infinite; }
   }

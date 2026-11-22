@@ -9,6 +9,7 @@ import { CallHistory } from "@/components/CallHistory";
 import { FamilyStrip, FamilyTab } from "@/components/FamilyTab";
 import { KitchenTab } from "@/components/KitchenTab";
 import { Wordmark } from "@/components/Wordmark";
+import { CallLanguages } from "@/components/CallLanguages";
 import { Dot, Panel, Pill, Row, Section } from "@/components/kit";
 import { LiveCallBanner } from "@/components/LiveCall";
 import { OrderTracker } from "@/components/OrderTracker";
@@ -287,7 +288,10 @@ const Index = () => {
                 <p className="hero-description">{cards.length
                   ? `${cards.length} ${cards.length === 1 ? "card is" : "cards are"} waiting for your review.`
                   : "Check in about meals, medicines or groceries by phone."}</p>
-                <div className="hero-controls"><CallMe state={s} /><span>in {s.language}</span></div>
+                <div className="hero-controls">
+                  <CallMe state={s} />
+                  <CallLanguages key={s.language} openingLanguage={s.language} />
+                </div>
               </div>
               <img className="hero-thali" alt="" src="/thali.webp" width="720" height="720" />
             </div>
