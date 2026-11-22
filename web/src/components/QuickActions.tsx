@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ArrowUp, Camera, Loader2, MessageCircle, PhoneCall, PhoneOutgoing, ShoppingBasket, Stethoscope, UtensilsCrossed } from "lucide-react";
+import { ArrowUp, Camera, Loader2, MessageCircle, PhoneCall, PhoneOutgoing, Plus, ShoppingBasket, Stethoscope, UtensilsCrossed } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } from "@/components/ui/drawer";
 import { Panel, Row } from "@/components/kit";
@@ -92,6 +92,27 @@ export function QuickActions({ state, onScan, onMeals }: { state: AppState; onSc
   );
 }
 
+/** Someone in household.yaml without a number yet (e.g. the cook): add it here, and Pathya can call them. */
+function AddNumber({ person, fail }: { person: { key: string; name: string; role: string }; fail: (e: Error) => void }) {
+  const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [phone, setPhone] = useState("");
+  const save = useMutation({
+    mutationFn: () => api.setPhone(person.key, phone),
+    onSuccess: () => { toast.success(`Saved. Pathya can call ${person.name} now.`); setOpen(false); qc.invalidateQueries({ queryKey: ["state"] }); },
+    onError: fail,
+  });
+  if (!open) return <Row icon={Plus} title={`Add ${person.name}'s number`} sub={`${person.role === "cook" ? "Cook" : "Family"} · so Pathya can call for the list`} onClick={() => setOpen(true)} />;
+  return (
+    <form className="flex gap-2 p-3" onSubmit={(e) => { e.preventDefault(); if (phone.trim()) save.mutate(); }}>
+      <input className={field} type="tel" inputMode="tel" autoFocus value={phone} onChange={(e) => setPhone(e.target.value)} placeholder={`${person.name}'s mobile`} />
+      <Button type="submit" className="h-[46px] shrink-0" disabled={save.isPending || phone.replace(/\D/g, "").length < 10}>
+        {save.isPending ? <Loader2 className="animate-spin" /> : "Save"}
+      </Button>
+    </form>
+  );
+}
+
 function Groceries({ state, done, fail }: { state: AppState; done: (m: string) => void; fail: (e: Error) => void }) {
   const [list, setList] = useState("");
   const cart = useMutation({ mutationFn: () => api.planCart(list), onSuccess: () => { setList(""); done("Cart ready on Home: tap to approve"); }, onError: fail });
@@ -109,7 +130,7 @@ function Groceries({ state, done, fail }: { state: AppState; done: (m: string) =
         </Button>
       </form>
       <Panel className="divide-y overflow-hidden">
-        {state.people.map((p) => (
+        {state.people.map((p) => p.has_phone === false ? <AddNumber key={p.key} person={p} fail={fail} /> : (
           <Row key={p.key} icon={PhoneOutgoing} title={`Call ${p.name} for the list`} sub={`${p.role === "cook" ? "Cook" : "Family"} · ${p.language}`}
                disabled={callList.isPending} onClick={() => callList.mutate(p.key)} />
         ))}

@@ -1,5 +1,5 @@
 """What is at home, and what was eaten today.
-Pantry: every delivered order (and every dry run, so the demo shows something) stocks the shelf. Each item gets a
+Pantry: every delivered order stocks the shelf (a dry run never does: nothing arrived). Each item gets a
 rough shelf life from its name (milk 2 days, dal 30 days ...); items close to the end are "running low" and the
 family is asked whether to reorder. Nothing is ordered from here: a reorder is a cart card that needs a tap.
 Food log: meals said on a call or typed in the app, with ESTIMATED calories and macros (not dietary advice)."""

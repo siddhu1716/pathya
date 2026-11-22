@@ -431,3 +431,20 @@ def test_photo_time_sets_the_meal_photos_are_kept_and_unclear_prescription_lines
     assert c.get(f"/api/photos/{r['photo']}").status_code == 404                          # discarded: deleted too
     seen.update(kind="medicine", medicines=[{"name_as_printed": "X", "strength": None, "form": None, "unclear": False}])
     assert "photo" not in c.post("/api/scan", data={"who": "amma"}, files={"photo": ("s.jpg", b"s", "image/jpeg")}).json()
+
+
+def test_a_household_with_no_doctor_yet_still_works():
+    from app.concierge import make_concierge
+    from app.experts.health.expert import HealthExpert
+    hh = {**HH, "clinics": {}, "people": {k: {kk: vv for kk, vv in v.items() if kk != "clinic"} for k, v in HH["people"].items()}}
+    store = Store(":memory:")
+    h = HealthExpert(store, hh)
+    agent = make_concierge(store, hh, None, h)
+    assert "book_doctor" not in [t.name for t in agent.tools] and "none saved yet" in agent.instructions
+    follow = {"expert": "health", "kind": "followup", "title": "Review due", "lines": [], "choices": [],
+              "payload": {"patient": "amma", "doctor": "Dr. X", "after_days": 14}}
+    out = asyncio.run(h.execute(follow, "book"))
+    assert out["ok"] is False and "Add a doctor" in out["error"]
+    store.remember("amma", "checkin:j1", {"feeling": "ok", "her_words": "baagunnanu", "summary_en": "fine"}, "t")
+    brief = h.brief_card("amma")
+    assert brief.payload["wa"].startswith("https://wa.me/?text=") and brief.payload["consult"]["name"] == "PharmEasy"

@@ -173,3 +173,13 @@ def test_family_adds_a_doctor_profile_and_books_from_it(tmp_path):
         job = c.post("/api/health/book", json={"patient": "amma", "clinic": new["key"], "window_start": "2026-12-01T00:00",
                                                "window_end": "2026-12-03T23:59", "part": "morning", "reason": "sugar review"}).json()
         assert store.job(job["job"])["payload"]["to"] == "+914023112345"
+
+
+def test_first_doctor_into_an_empty_clinics_section(tmp_path):
+    from app.experts.health import finder
+    path = tmp_path / "household.yaml"
+    path.write_text("user:\n  name: Shiva\npeople: {}\n# Your doctors\nclinics: {}\naddress_hint: Home\n", encoding="utf-8")
+    hh = yaml.safe_load(path.read_text(encoding="utf-8"))
+    key = finder.add_to_household(str(path), hh, {"doctor": "Dr. A", "clinic": "Clinic", "phone_e164": "+914023112345"})
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    assert data["clinics"][key]["phone"] == "+914023112345" and data["address_hint"] == "Home" and hh["clinics"][key]

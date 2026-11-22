@@ -50,8 +50,15 @@ class KitchenExpert(Expert):
     def __init__(self, store, household, agent_im, ops, zepto=None):
         self.store, self.hh, self.agent_im, self.ops, self.zepto = store, household, agent_im, ops, zepto
 
-    def weekly_call(self, person, run_at=None, via=None):
+    def _phone(self, person):
+        """Only household.yaml numbers are called (rule 8); someone without one can't be."""
         p = self.hh["people"][person]
+        if not p.get("phone"):
+            raise ValueError(f"{p['name']} has no phone number yet. Add it in Groceries (or household.yaml).")
+        return p
+
+    def weekly_call(self, person, run_at=None, via=None):
+        p = self._phone(person)
         return self.store.add_job(self.name, "list", person, {"person": person, "to": p["phone"], **({"via": via} if via else {})},
                                   run_at)
 
@@ -97,7 +104,7 @@ class KitchenExpert(Expert):
 
     # ---- meal plans, the cook's menu call, nutrition ----
     def menu_call(self, person, menu, run_at=None):
-        p = self.hh["people"][person]
+        p = self._phone(person)
         return self.store.add_job(self.name, "menu", person, {"person": person, "to": p["phone"], "menu": menu}, run_at)
 
     def _menu_plan(self, job):
@@ -133,11 +140,12 @@ class KitchenExpert(Expert):
         lines += [f"{p['who']}'s plate: {p['plate']} (about {p['kcal']} kcal, protein {p['protein_g']} g)"
                   for p in first.get("people") or []]
         eaters, guests = count
-        who = (f" for {eaters + guests} people" if eaters is not None else "") + \
+        n = (eaters or 0) + guests
+        who = (f" for {n} {'person' if n == 1 else 'people'}" if eaters is not None else "") + \
               (f" ({guests} guest{'s' if guests > 1 else ''})" if guests else "")
         avg = lambda k: round(sum(d.get(k, 0) for d in plan["days"]) / max(1, len(plan["days"])))
         choices = [{"id": "order", "label": f"Order {len(need)} missing ingredients"}] if need else []
-        if cook and plan.get("days"):
+        if cook and plan.get("days") and self.hh["people"][cook].get("phone"):
             choices.append({"id": "brief", "label": f"Call {self.hh['people'][cook]['name']} with tomorrow's menu"})
         choices.append({"id": "keep", "label": "Just keep the plan"})
         return Card(self.name, "plan", f"Meal plan: next {days} day{'s' if days > 1 else ''}{who}", lines,
@@ -147,19 +155,19 @@ class KitchenExpert(Expert):
                     payload={"plan": plan, "need": need})
 
     def nutrition_card(self, plan, nut):
+        """The nutrition brief, for a nutritionist (WhatsApp) or a doctor (PharmEasy online consultation)."""
         from app.core import safety
-        from app.experts.health.expert import wa_link
+        from app.experts.health.expert import share_payload
         text = pl.brief_text(self.hh, plan, nut)
         verdict = safety.check(text)
         who = self.hh.get("nutritionist") or {}
         warnings = {"blocked": ["The safety check held part of this brief. Review it before sharing."],
                     "unchecked": ["Safety check is off (set GUARDRAIL_ID)."]}.get(verdict.status, [])
-        choices = [{"id": "share", "label": f"WhatsApp draft to {who.get('name', 'your nutritionist')}"}] if who.get("phone") else []
-        return Card(self.name, "brief", f"Nutrition brief for {who.get('name', 'your nutritionist')}", verdict.text.split("\n"),
-                    question="Share it?" if choices else "Add a nutritionist to household.yaml to share it.",
-                    choices=choices + [{"id": "ok", "label": "Keep"}], warnings=warnings,
-                    payload={"text": verdict.text, "safety": verdict.status,
-                             "wa": wa_link(who["phone"], verdict.text) if who.get("phone") else None})
+        label = f"WhatsApp {who['name']}" if who.get("phone") and who.get("name") else "Share on WhatsApp"
+        return Card(self.name, "brief", "Nutrition brief" + (f" for {who['name']}" if who.get("name") else ""),
+                    verdict.text.split("\n"), question="Share it with your nutritionist or a doctor?",
+                    choices=[{"id": "share", "label": label}, {"id": "ok", "label": "Keep"}], warnings=warnings,
+                    payload={"text": verdict.text, "safety": verdict.status, **share_payload(verdict.text, who.get("phone"))})
 
     async def handle(self, text, ref=None, who=None):
         """A list -> a cart card (Instamart, else Zepto, else the list). Items that clash with a family member's own

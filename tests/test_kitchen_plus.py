@@ -38,15 +38,18 @@ def test_memory_learns_what_the_home_buys():
     assert u[1]["name"] == "Onion 1 kg" and u[1]["days_ago"] >= 1
 
 
-def test_tracker_record_feeds_memory_even_for_dry_runs():
+def test_a_dry_run_is_not_remembered_as_bought():
     st = Store(":memory:")
     tracker.record(st, "c1", {"lines": ["Curd 500 g x1 - Rs 52"], "payload": {}}, {"dry_run": True})
-    assert pl.usuals(st)[0]["store"] == "dry run"
+    assert pl.usuals(st) == []
+    tracker.record(st, "c2", {"lines": ["Curd 500 g x1 - Rs 52"], "payload": {}}, {"order": {"orderId": "O2"}})
+    assert pl.usuals(st)[0]["store"] == "swiggy"
 
 
 def test_nutrition_per_person_per_day_and_cache():
     st = Store(":memory:")
     st.add_order("O1", "swiggy", None, None, ["Milk 1 Ltr x2 - Rs 122", "Dal 1 kg x1 - Rs 160"], "₹282", "", "a1")
+    st.add_order("dry-x", "dry run", None, None, ["Milk 1 Ltr x9 - Rs 549"], "₹549", "", "a1")   # never counted
     calls = []
 
     async def fake(names):
@@ -95,6 +98,11 @@ def test_nutrition_brief_is_safety_checked_and_shareable():
     assert card.kind == "brief" and card.payload["safety"] == "unchecked" and "protein 40 g" in "\n".join(card.lines)
     assert card.payload["wa"].startswith("https://wa.me/919800000009?text=")
     assert asyncio.run(k.execute(card.to_dict(), "share"))["open"] == card.payload["wa"]
+    assert card.payload["consult"]["url"].startswith("https://pharmeasy.in/doctor-consultation")      # or a doctor
+    alone = KitchenExpert(Store(":memory:"), {**HH, "nutritionist": None}, None, None).nutrition_card(PLAN, {**nut, "orders": 0})
+    assert "No groceries were ordered" in alone.payload["text"] and "0 kcal" not in alone.payload["text"]
+    assert alone.payload["wa"].startswith("https://wa.me/?text=") and alone.choices[0]["label"] == "Share on WhatsApp"
+    assert alone.title == "Nutrition brief" and alone.payload["consult"]["name"] == "PharmEasy"
 
 
 @pytest.fixture

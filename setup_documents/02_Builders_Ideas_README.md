@@ -19,7 +19,7 @@ Researched 21 Nov 2026 for Shiva Nampalli · Builders hackathon, Equal AI HQ, Hy
 - **Prepare three ideas in your head:**
   - **Kaam Ho Gaya** makes the calls for you.
   - **Scam Kavach** guards your parents' phones.
-  - **QuickPick Kitchen** plans, shops and pays within limits.
+  - **Pathya Kitchen** plans, shops and pays within limits.
 - **Strong alternates:** COD Confirm, Yojana Saathi, AgentPay Guard and Voice Agent QA Lab.
 - **Every demo needs four things:**
   - one real action
@@ -116,8 +116,8 @@ Researched 21 Nov 2026 for Shiva Nampalli · Builders hackathon, Equal AI HQ, Hy
 | AI for City Hall (Winter 2027, Gustaf Alströmer) | Permits, 311 (non-emergency city services), public records, licensing, inspections | Municipal grievances and permits | Civic call desk (a variant of Yojana Saathi) |
 | Proving You're Human (Fall 2026, Max Kolysh) | Rebuild trust on calls and messages as deepfakes spread | Digital-arrest and voice-clone scams | Scam Kavach |
 | AI for the Aging Population (Fall 2026, Max Kolysh) | Voice interfaces for seniors, and coordination for caregivers | Parents living far from their children | Amma Care Calls |
-| AI-Powered Consumer Products for 1 Billion People (Fall 2026, Raphael Schaad) | Agents are now good and cheap enough for mass consumer products | Voice-first India | Kaam Ho Gaya, QuickPick Kitchen |
-| Multiplayer AI (Fall 2026, Aaron Epstein) | Shared, live agent sessions | A household agent the whole family shares | A feature in QuickPick Kitchen |
+| AI-Powered Consumer Products for 1 Billion People (Fall 2026, Raphael Schaad) | Agents are now good and cheap enough for mass consumer products | Voice-first India | Kaam Ho Gaya, Pathya Kitchen |
+| Multiplayer AI (Fall 2026, Aaron Epstein) | Shared, live agent sessions | A household agent the whole family shares | A feature in Pathya Kitchen |
 | AI-Native Compliance Infrastructure (Fall 2026, Daivik Goel) | Monitoring, audit trails and reporting done by AI | Audit trails and limits for agents that spend money | AgentPay Guard |
 | The Primer (Fall 2026, Andrew Miklas) | An adaptive tutor for young children | A mother-tongue tutor over a phone call | Padhai Call |
 | Own Your Intelligence, and AI for the Air-Gapped Economy (Winter 2027) | Control where models run and where data lives | Data residency in India | A pitch angle for any idea |
@@ -232,7 +232,7 @@ Researched 21 Nov 2026 for Shiva Nampalli · Builders hackathon, Equal AI HQ, Hy
 - **Recording consent:** announce the recording when the call starts.
 - **Over-promising:** never claim it can recover lost money.
 
-#### A3. QuickPick Kitchen (your QuickPick, rebuilt): "Sunday night, your week's food is planned, bought, and the cook is briefed, all within the limit you set."
+#### A3. Pathya Kitchen: "Sunday night, your week's food is planned, bought, and the cook is briefed, all within the limit you set."
 
 **Who it's for:** working families with a cook, or with a busy kitchen.
 
@@ -363,14 +363,14 @@ Researched 21 Nov 2026 for Shiva Nampalli · Builders hackathon, Equal AI HQ, Hy
 |---|---|---|
 | Voice agents, calls, making phones more useful | Kaam Ho Gaya | Hold-For-Me |
 | Trust, safety, fraud, spam | Scam Kavach | AgentPay Guard |
-| Commerce, payments, shopping, concierge | QuickPick Kitchen | COD Confirm |
+| Commerce, payments, shopping, concierge | Pathya Kitchen | COD Confirm |
 | Small businesses, Bharat | Kirana Receptionist | COD Confirm |
 | Public good, government, financial inclusion | Yojana Saathi | Claim Saathi |
 | Health, the elderly, family | Amma Care Calls | Scam Kavach |
 | Developer tools, infrastructure, agent reliability | Voice Agent QA Lab | AgentPay Guard |
 | Education | Padhai Call | Yojana Saathi (scholarships) |
 | Anything, as long as it uses OpenAI and AWS | Kaam Ho Gaya | Scam Kavach |
-| Building on the ChatGPT platform or plugins | QuickPick Kitchen as a plugin | Kirana Receptionist as a plugin |
+| Building on the ChatGPT platform or plugins | Pathya Kitchen as a plugin | Kirana Receptionist as a plugin |
 
 **Adapting when nothing fits:** keep the reusable core (voice loop, delegation backend, rules engine, approval, audit trail, scheduler). Swap only the action connector and the domain rules.
 
@@ -426,7 +426,7 @@ Score each idea from 1 to 5 on every row. Multiply by the weight and add up the 
 |---|---|
 | Kaam Ho Gaya | "You speak once. It makes five calls. You approve one." |
 | Scam Kavach | "The first voice a scammer meets on Amma's phone is an AI that knows every script." |
-| QuickPick Kitchen | "Sunday 8 PM: the week's food is planned, bought, and the cook is briefed, all within the limit you set." |
+| Pathya Kitchen | "Sunday 8 PM: the week's food is planned, bought, and the cook is briefed, all within the limit you set." |
 | COD Confirm | "Every COD order gets a 60-second call in the buyer's language, and a reason to pay now." |
 | Yojana Saathi | "Verify once, apply everywhere, on a phone call." |
 | AgentPay Guard | "Let agents spend. Never let them overspend." |

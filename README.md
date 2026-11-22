@@ -1,6 +1,6 @@
 # Pathya
 
-*Pathya (పథ్య / पथ्य): the diet that suits a particular person. Formerly QuickPick.*
+*Pathya (పథ్య / पथ्य): the diet that suits a particular person.*
 
 **Family nutrition, from a phone call to the plate.**
 
@@ -58,9 +58,14 @@ and turns what is missing into a Swiggy Instamart cart you approve with one tap.
   - daily reminder calls for the length of the course;
   - a missed dose becomes a card for you.
 - **Orders:** Swiggy Instamart MCP (Zepto MCP for missing items, or the whole list when Instamart is offline).
-  The cart, total, address and payment are shown; nothing is placed without your tap. `DRY_RUN=1` is the default.
+  The cart, total, address and payment are shown; nothing is placed without your tap. `DRY_RUN=1` is the default; a
+  dry run is listed as "DRY RUN: not placed" and never stocks At home, the buy-again memory or the nutrition estimate.
 - **At home:** delivered orders stock a pantry with shelf-life estimates. When something is running low, a reorder is
-  one tap away.
+  one tap away. Groceries asks for the cook's number if it isn't saved yet, so menu calls can reach them.
+- **Nutrition brief** (Meals > Household nutrition > Share): the shopping estimate, each member's targets and the meal
+  plan, facts only. Send it on WhatsApp (to your saved nutritionist, or pick a contact), or tap "Share with a doctor
+  on PharmEasy": the brief is copied and PharmEasy's online consultation opens, ready to paste. The doctor brief for a
+  booking works the same way.
 - **Health score:** 0-100 per person over the last 7 days, built from habits only:
   - food 40: meals logged and close to their own targets;
   - medicines 30: doses taken as written;
@@ -72,7 +77,8 @@ and turns what is missing into a Swiggy Instamart cart you approve with one tap.
 - **Parents:** the evening check-in call is on by default for parents and members 60+ with a phone.
 - **Book a doctor:**
   - "Doctors": your doctors as profiles (specialty, clinic, who in the family sees them). Tap Book, pick who, the week
-    and the time of day, and Pathya phones the clinic. "Add a doctor" saves one into `household.yaml`.
+    and the time of day, and Pathya phones the clinic. "Add a doctor" saves one into `household.yaml`. A new
+    household starts with no doctors; add your own here.
   - "Find a specialist near you": pick a specialty (or name a hospital) and the area.
   - "Plan by call": Pathya calls you, asks who it's for, the reason in their words, the place and the days, and shows
     a card.
@@ -137,12 +143,3 @@ phone / browser ──► OpenAI Realtime (gpt-realtime) ──► Expert tools 
 - `app/core/`: store, scheduler, call bridges (Twilio and Exotel), languages, call rules, voice settings
 - `web/`: the phone-first app (Home, Family, Meals, Orders, More)
 - `mobile/`: the Android app (Capacitor launcher for your Pathya link)
-
-## Built before / built at Builders '26
-
-| Before the hackathon | At the hackathon |
-|---|---|
-| The idea (the earlier QuickPick, github.com/siddhu1716/QuickPick); its React UI shell was reused; its scraper backend was dropped | Swiggy and Zepto MCP ordering with tap-to-commit cards (first real order placed) |
-| `docs/BUILD_V2.md` starter: store, scheduler, caller, safety check, Swiggy rules, Health Expert | Realtime calls in the browser, Twilio and Exotel, Telugu-first, language following, wrap-up rule |
-| | Family profiles, personal targets, per-person plates, food log, medicine reminder calls, leaderboard |
-| | Pantry, order tracking, Doorstep Expert, minimal dark phone-first UI, `run.sh` |

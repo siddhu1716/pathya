@@ -64,7 +64,7 @@ def add_to_household(path, hh, clinic):
              **({"specialty": clinic["specialty"]} if clinic.get("specialty") else {})}
     if path:
         p = Path(path)
-        text = p.read_text(encoding="utf-8")
+        text = re.sub(r"(?m)^clinics:[ \t]*\{[ \t]*\}[ \t]*", "clinics:", p.read_text(encoding="utf-8"))   # an empty `{}`
         block = (f"  {key}:                      # added in the app after a human confirmed; source: "
                  f"{str(clinic.get('source') or 'web')[:80]}\n"
                  + "".join(f"    {k}: {json.dumps(v, ensure_ascii=False)}\n" for k, v in entry.items()))

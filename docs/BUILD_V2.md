@@ -1,9 +1,9 @@
-# QuickPick v2 — Experts
+# Pathya v2 — Experts
 
 **Build document · Builders '26 (OpenAI × Equal AI, powered by AWS) · Track 1: Build Creative**
 Shiva Nampalli · Equal AI HQ, Hyderabad · Sat 21 – Sun 22 Nov 2026 · **Code freeze: Sunday 2:00 PM**
 
-> **One line:** QuickPick Experts phone your family and your clinic in Telugu, turn what they say into a Swiggy order or a doctor's appointment, and wait for your one tap before anything is committed.
+> **One line:** Pathya Experts phone your family and your clinic in Telugu, turn what they say into a Swiggy order or a doctor's appointment, and wait for your one tap before anything is committed.
 
 ---
 
@@ -62,7 +62,7 @@ Shiva Nampalli · Equal AI HQ, Hyderabad · Sat 21 – Sun 22 Nov 2026 · **Code
 | Dots | Read here as **dots.ocr**, the open-source (MIT) document parser from rednote-hilab: a second prescription and lab-report reader if you have a GPU endpoint. Otherwise use the OpenAI vision reader in Appendix B | If "Dots" is something else, it fits in as an optional tool. Don't block on it |
 | Swiggy Builders Club MCP | Instamart: addresses, search, cart, payment options, checkout, payment status, confirm, delivery status, past orders | No scraping, no price comparison; show Swiggy's success message as-is |
 | Twilio | Outbound phone calls bridged to OpenAI Realtime | A trial account is too restricted; upgrade first (§5.4) |
-| Open source | QuickPick (your base), openai-agents-python `examples/realtime/twilio`, `mcp-remote` | Keep a "built before / built at Builders" table in the README |
+| Open source | openai-agents-python `examples/realtime/twilio`, `mcp-remote` | Keep dependency setup documented in the README |
 
 ---
 
@@ -94,9 +94,9 @@ Shiva Nampalli · Equal AI HQ, Hyderabad · Sat 21 – Sun 22 Nov 2026 · **Code
 ## 4. Architecture
 
 ```
-          Web app (phone-first): Home · Ask QuickPick · Cards to tap · Upcoming calls (Run now) · Timeline
+          Web app (phone-first): Home · Ask Pathya · Cards to tap · Upcoming calls (Run now) · Timeline
                                                    │
-                                       FastAPI (your QuickPick repo)
+                                       FastAPI (your Pathya repo)
   ┌────────────────────────────────────────────────┼─────────────────────────────────────────────┐
   │ Concierge agent (Agents SDK). Experts are its tools: order_groceries · book_doctor ·         │
   │                                                      check_in · call_for_list                │
@@ -111,7 +111,7 @@ Shiva Nampalli · Equal AI HQ, Hyderabad · Sat 21 – Sun 22 Nov 2026 · **Code
    → tools fill plan.saved → call ends → expert.after_call(job, saved) → Card → you tap → expert.execute(card, choice)
 ```
 
-QuickPick's existing MasterAgent becomes the **Concierge** (`app/concierge.py`). Keep the old scraper out of the demo path.
+The **Concierge** (`app/concierge.py`) routes requests to the appropriate Expert. Ordering uses official MCP integrations, never scraping.
 
 ### 4.1 The Expert contract (`app/experts/base.py`)
 
@@ -171,11 +171,10 @@ Adding an Expert means one folder plus `register(MyExpert(...))`. **Time how lon
 ### 5.1 Repo and coding agents
 
 ```bash
-cd QuickPick && git status                              # clean tree first
-git tag pre-builders <last-commit-before-today> && git push --tags   # if not done yet
+cd pathya && git status                                 # clean tree first
 git checkout -b v2-experts
-# unzip QuickPick_v2_starter.zip into the repo root:
-#   app/  scripts/  tests/  infra/  docs/BUILD_V2.md  AGENTS.md  .env.example  household.example.yaml
+# The repo contains app/, scripts/, tests/, infra/, docs/BUILD_V2.md,
+# AGENTS.md, .env.example and household.example.yaml.
 npm i -g @openai/codex mcp-remote                       # Codex CLI + Swiggy's bridge, preinstalled
 codex                                                   # first run: sign in with your ChatGPT Pro account
 ```
@@ -216,12 +215,12 @@ Save the venue (RMZ The Loft, Raidurg) as an address in the Swiggy app and keep 
 ```bash
 export AWS_REGION=us-east-1          # or the region where your Bedrock access is enabled
 aws bedrock create-guardrail --region "$AWS_REGION" --name qp-health \
-  --description "QuickPick Health Expert: no diagnosis, no medicine advice, no reading results" \
+  --description "Pathya Health Expert: no diagnosis, no medicine advice, no reading results" \
   --topic-policy-config file://infra/guardrail_topics.json \
   --content-policy-config file://infra/guardrail_content.json \
   --sensitive-information-policy-config file://infra/guardrail_pii.json \
-  --blocked-input-messaging "QuickPick can't help with that. Please ask the doctor." \
-  --blocked-outputs-messaging "Held for review: QuickPick doesn't give medical advice. Please ask the doctor."
+  --blocked-input-messaging "Pathya can't help with that. Please ask the doctor." \
+  --blocked-outputs-messaging "Held for review: Pathya doesn't give medical advice. Please ask the doctor."
 aws bedrock create-guardrail-version --region "$AWS_REGION" --guardrail-identifier <guardrailId from above>
 ```
 
@@ -288,12 +287,7 @@ Order: H1 booking call → booking card, calendar file, reminder jobs → H2 che
 ### Phase 6: Demo, slides, README (Sun 09:30–12:00, 2.5 h)
 
 - Record every demo segment on video by 10:00 AM, as the backup if a live call fails.
-- README: what it is, the architecture picture, how to run, and this table:
-
-| Part | Built before 21 Nov | Built at Builders |
-|---|---|---|
-| QuickPick FastAPI base, MasterAgent | ✓ | |
-| Swiggy MCP ordering, Experts platform, Caller, Kitchen and Health Experts, UI | | ✓ |
+- README: what it is, the architecture picture, how to run, and the implemented features.
 
 ### Phase 7: Buffer and submit (Sun 12:00–14:00, 2 h)
 
@@ -353,7 +347,7 @@ Test it with three sentences that must be held ("She probably has diabetes", "Gi
 ## 9. Slides (5)
 
 1. **Problem:** Indian homes run on phone calls: the cook's list, Amma's appointments, reminders. One person is the switchboard.
-2. **What we built:** QuickPick Experts. Kitchen is live on Swiggy Instamart; Health handles bookings, check-ins, doctor briefs and reminders. Screenshot of a card.
+2. **What we built:** Pathya Experts. Kitchen is live on Swiggy Instamart; Health handles bookings, check-ins, doctor briefs and reminders. Screenshot of a card.
 3. **How it works:** the architecture diagram, the Expert contract, and "Health Expert added in [N] hours".
 4. **Trust and results:** the human tap, limits in code, Bedrock Guardrails; measured journey times from the timeline (call → cart → order → delivered).
 5. **What's next:** more Experts (Swiggy Food, Dineout, bills, home services); pre-approved budgets with UPI Reserve Pay (Swiggy's payment options already carry `reservePay` and `agenticPaymentEligible`); consented health records; Experts behind an incoming-call assistant like Equal AI's.
@@ -366,7 +360,7 @@ Test it with three sentences that must be held ("She probably has diabetes", "Gi
 |---|---|---|
 | Swiggy refuses sign-in from your own code | auth error on the first run | (a) Zepto's MCP: list its tools, adapt `place()`; (b) ask builders@swiggy.in for staging access, with a short video of the flow; (c) a stand-in server built from Swiggy's published schemas, plus a real order recorded through a supported AI client from Swiggy's "Connect your AI client" page |
 | Instamart doesn't serve the venue | address warning on the card | Deliver where someone can receive it, and film it |
-| Twilio can't reach Indian numbers | call fails or geo error | Recheck the upgrade and geo permissions; else Phase 3b (voice note) or a browser "Talk to QuickPick" page using Realtime over WebRTC |
+| Twilio can't reach Indian numbers | call fails or geo error | Recheck the upgrade and geo permissions; else Phase 3b (voice note) or a browser "Talk to Pathya" page using Realtime over WebRTC |
 | Telugu voice quality | the first test call | Follow the speaker's language; shorter sentences; read back at most 3 items |
 | The model calls update_cart more than once | odd cart lines | `place()` re-reads the cart anyway, and the card shows the real cart before any tap |
 | Guardrail holds a harmless brief | "held" badge | Tighten topic definitions; the card still shows, with a review warning |
@@ -387,9 +381,9 @@ Test it with three sentences that must be held ("She probably has diabetes", "Gi
 ## Appendix A: AGENTS.md (copy to the repo root; the starter zip has it)
 
 ```markdown
-# AGENTS.md: QuickPick v2 (Experts)
+# AGENTS.md: Pathya v2 (Experts)
 
-QuickPick Experts phone a family's people (the cook, Amma) and their clinic, turn what they say into a Swiggy Instamart order or a doctor's appointment, and wait for a human tap before anything is committed. Read docs/BUILD_V2.md before any task.
+Pathya Experts phone a family's people (the cook, Amma) and their clinic, turn what they say into a Swiggy Instamart order or a doctor's appointment, and wait for a human tap before anything is committed. Read docs/BUILD_V2.md before any task.
 
 ## Hard rules: never break them, never "simplify" them away
 1. Only `swiggy.place()` may call Swiggy `checkout`, and only from a card the human tapped. Never retry checkout; on error, list active orders and stop.
@@ -431,7 +425,7 @@ All of it is in the starter zip. The ordering, approvals, scheduler, caller, saf
 **`app/experts/base.py`**
 
 ```python
-"""QuickPick v2 - the Expert contract. One folder per Expert; the platform
+"""Pathya v2 - the Expert contract. One folder per Expert; the platform
 (caller, approvals, jobs, memory, safety) is shared by all of them."""
 from __future__ import annotations
 
@@ -717,7 +711,7 @@ def hang_up(twilio_client, call_sid):
 **`app/core/safety.py`**
 
 ```python
-"""Health safety net: every health text QuickPick sends or saves passes Amazon Bedrock
+"""Health safety net: every health text Pathya sends or saves passes Amazon Bedrock
 Guardrails (ApplyGuardrail) first. Denied topics: diagnosis, medicine advice, result reading."""
 import os
 from dataclasses import dataclass
@@ -753,7 +747,7 @@ def check(text, source="OUTPUT", client=None):
 **`app/experts/kitchen/swiggy.py`**
 
 ```python
-"""QuickPick Kitchen - Swiggy Instamart core (Phase 1).
+"""Pathya Kitchen - Swiggy Instamart core (Phase 1).
 The model can look things up and fill the cart. It cannot place an order:
 checkout is plain code, called only after a human says yes to the exact cart."""
 import asyncio, json, os, re, time
@@ -908,7 +902,7 @@ import os
 from app.experts.base import CallPlan, Card, Expert
 from app.experts.kitchen import swiggy as sw
 
-LIST_CALL = """You are QuickPick, an AI assistant, calling {who} for {user}'s family to take this week's grocery list.
+LIST_CALL = """You are Pathya, an AI assistant, calling {who} for {user}'s family to take this week's grocery list.
 Your first sentence: "{greeting}" Speak {lang}, simply and politely.
 Ask what the kitchen needs this week; ask for quantities when missing.
 You may remind them of at most three usual items: {usual}.
@@ -936,7 +930,7 @@ class KitchenExpert(Expert):
     def call_plan(self, job):
         p, user = self.hh["people"][job["payload"]["person"]], self.hh["user"]["name"]
         usual = [str(f["value"]) for f in self.store.facts(prefix="usual:")][:3]
-        greeting = f"Namaskaram {p['name']}, I am QuickPick, an AI assistant calling for {user} about this week's groceries."
+        greeting = f"Namaskaram {p['name']}, I am Pathya, an AI assistant calling for {user} about this week's groceries."
         plan = CallPlan(LIST_CALL.format(who=p["name"], user=user, greeting=greeting,
                                          lang=p.get("language", "Telugu"), usual=", ".join(usual) or "none"),
                         greeting, max_minutes=5)
@@ -1034,7 +1028,7 @@ NO_ADVICE = ("You never give medical advice: never suggest, start, stop or chang
 EMERGENCY = ("If she mentions chest pain, breathlessness, fainting, sudden weakness on one side, heavy bleeding, "
              "or says it is an emergency: call alert_family at once, tell her calmly to call 108 now, and end the call.")
 
-CLINIC_CALL = """You are QuickPick, an AI assistant, phoning {clinic} for {user} to book an appointment
+CLINIC_CALL = """You are Pathya, an AI assistant, phoning {clinic} for {user} to book an appointment
 for {patient} (age {age}) with {doctor}. Your first sentence: "{greeting}"
 Speak the receptionist's language (Telugu, Hindi or English), in short sentences. Never pretend to be human.
 Share only the patient's name and age, the reason "{reason}" and the callback number {callback}.
@@ -1043,7 +1037,7 @@ Then call book_slot with one slot; it refuses anything outside the family's wind
 hold the earliest slot and call hold_slot. After booking, repeat date, time, doctor and what to bring once.
 Never discuss payment details. Finish with end_call."""
 
-CHECKIN_CALL = """You are QuickPick, an AI assistant, calling {patient} for {user}. Speak simple, warm {lang},
+CHECKIN_CALL = """You are Pathya, an AI assistant, calling {patient} for {user}. Speak simple, warm {lang},
 slowly. Your first sentence: "{greeting}"
 Purpose: {purpose}
 Ask one thing at a time: how she feels; anything new and since when; today's BP or sugar reading if she has
@@ -1072,7 +1066,7 @@ def _esc(s):
 
 def make_ics(uid, start, minutes, title, location, notes=""):
     utc = lambda d: d.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    rows = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//QuickPick//Experts//EN", "BEGIN:VEVENT",
+    rows = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Pathya//Experts//EN", "BEGIN:VEVENT",
             f"UID:{uid}@quickpick", f"DTSTAMP:{utc(datetime.now(timezone.utc))}", f"DTSTART:{utc(start)}",
             f"DTEND:{utc(start + timedelta(minutes=minutes))}", f"SUMMARY:{_esc(title)}",
             f"LOCATION:{_esc(location)}", f"DESCRIPTION:{_esc(notes)}", "BEGIN:VALARM", "TRIGGER:-PT2H",
@@ -1126,7 +1120,7 @@ class HealthExpert(Expert):
     def _booking_plan(self, p, pat, user):
         c = self.hh["clinics"][p["clinic"]]
         start, end = to_ist(p["window_start"]), to_ist(p["window_end"])
-        greeting = (f"Hello, I am QuickPick, an AI assistant calling for {user['name']} "
+        greeting = (f"Hello, I am Pathya, an AI assistant calling for {user['name']} "
                     f"to book an appointment with {c['doctor']}.")
         window = f"{p.get('part') or 'any time'}, {start:%a %d %b %H:%M} to {end:%a %d %b %H:%M}"
         plan = CallPlan(CLINIC_CALL.format(clinic=c["clinic"], user=user["name"], patient=pat["name"],
@@ -1172,7 +1166,7 @@ class HealthExpert(Expert):
 
     def _checkin_plan(self, p, pat, user):
         meds = ", ".join(m.get("name_as_written", "") for m in self.meds(p["patient"])) or "her usual medicines"
-        greeting = f"Namaskaram {pat['name']}, I am QuickPick, an AI assistant calling for {user['name']}."
+        greeting = f"Namaskaram {pat['name']}, I am Pathya, an AI assistant calling for {user['name']}."
         plan = CallPlan(CHECKIN_CALL.format(patient=pat["name"], user=user["name"], lang=pat.get("language", "Telugu"),
                                             greeting=greeting, purpose=p["purpose"], meds=meds,
                                             no_advice=NO_ADVICE, emergency=EMERGENCY),
@@ -1227,7 +1221,7 @@ class HealthExpert(Expert):
         c, pat = self.hh["clinics"][p["clinic"]], self.hh["people"][p["patient"]]
         when = to_ist(b["slot"])
         ics = make_ics(f"{p['patient']}-{when:%Y%m%d%H%M}", when, 30, f"{pat['name']} - {b['doctor']}", c["clinic"],
-                       f"Reason: {p['reason']}. Booked by QuickPick.")
+                       f"Reason: {p['reason']}. Booked by Pathya.")
         return Card(self.name, "booking", "Appointment booked",
                     [f"{when:%a %d %b, %I:%M %p} - {b['doctor']}", c["clinic"],
                      f"Fee: {b.get('fee') or 'not mentioned'}", f"Bring: {b.get('bring') or 'not mentioned'}"],
@@ -1433,7 +1427,7 @@ def make_concierge(store, hh, kitchen, health):
 
     people = ", ".join(f"{k} ({v['name']})" for k, v in hh["people"].items())
     clinics = ", ".join(f"{k} ({v['doctor']}, {v['clinic']})" for k, v in hh["clinics"].items())
-    return Agent(name="QuickPick",
+    return Agent(name="Pathya",
                  instructions=CONCIERGE.format(user=hh["user"]["name"], people=people, clinics=clinics,
                                                now=datetime.now(IST).strftime("%a %d %b %Y %H:%M")),
                  tools=[order_groceries, book_doctor, check_in, call_for_list],
@@ -1741,7 +1735,7 @@ print("ALL V2 CHECKS PASSED")
 **`household.example.yaml`**
 
 ```yaml
-# Who QuickPick works for. Phone numbers in E.164. Only people who agreed to AI calls.
+# Who Pathya works for. Phone numbers in E.164. Only people who agreed to AI calls.
 user:
   name: Shiva
   phone: "+91XXXXXXXXXX"

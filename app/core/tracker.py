@@ -19,15 +19,14 @@ def order_ids(order):
 
 
 def record(store, aid, card, result):
-    """After a successful tap on an order card: one orders row per store order (dry runs are marked)."""
+    """After a successful tap on an order card: one orders row per store order. A dry run is recorded as "not placed"
+    and nothing else: it never stocks "At home", the usual orders or the nutrition estimate, because nothing came."""
     p = card.get("payload") or {}
     shop = p.get("store", "swiggy")
     common = dict(card=aid, ref=p.get("ref"), items=card.get("lines", []), total=card.get("total"),
                   address=card.get("address"), address_id=p.get("address_id"))
     if result.get("dry_run"):
         store.add_order(f"dry-{aid}", "dry run", status="DRY RUN: not placed", **common)
-        _remember(store, card, "dry run")
-        stock(store, card.get("lines", []), "dry run", f"dry-{aid}")   # so the demo's "At home" fills up
         return [f"dry-{aid}"]
     ids = order_ids(result.get("order"))
     eta = result.get("eta") or {}

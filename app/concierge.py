@@ -18,9 +18,9 @@ Never give medical advice. Reply in one or two short lines saying what you start
 
 
 def make_concierge(store, hh, kitchen, health):
-    # Literal types become enums in the tool schema, so the model can only pass real household keys.
-    Person = Literal[tuple(hh["people"])]
-    Clinic = Literal[tuple(hh["clinics"])]
+    # Literal types become enums in the tool schema, so the model can only pass real household keys. A tool whose list
+    # is empty (no doctor saved yet, nobody listed) is left out, so the model can't call it.
+    people_keys, clinic_keys = tuple(hh.get("people") or {}), tuple(hh.get("clinics") or {})
 
     @function_tool
     async def order_groceries(items: str) -> str:
@@ -28,26 +28,35 @@ def make_concierge(store, hh, kitchen, health):
         card = await kitchen.handle(items)
         return f"Cart ready for approval (card {store.add_card(card.to_dict())})."
 
-    @function_tool
-    def book_doctor(patient: Person, clinic: Clinic, window_start: str, window_end: str, part: str, reason: str) -> str:
-        """Phone a clinic and book inside this window. part: morning, afternoon, evening or any."""
-        jid = health.book(patient, clinic, window_start, window_end, None if part == "any" else part, reason)
-        return f"Calling the clinic now (job {jid})."
+    tools = [order_groceries]
+    if people_keys and clinic_keys:
+        Person, Clinic = Literal[people_keys], Literal[clinic_keys]
 
-    @function_tool
-    def check_in(patient: Person, purpose: str) -> str:
-        """Phone a family member to check in: how they feel and what to ask the doctor."""
-        return f"Calling now (job {health.checkin(patient, purpose)})."
+        @function_tool
+        def book_doctor(patient: Person, clinic: Clinic, window_start: str, window_end: str, part: str, reason: str) -> str:
+            """Phone a clinic and book inside this window. part: morning, afternoon, evening or any."""
+            jid = health.book(patient, clinic, window_start, window_end, None if part == "any" else part, reason)
+            return f"Calling the clinic now (job {jid})."
+        tools.append(book_doctor)
+    if people_keys:
+        Person = Literal[people_keys]
 
-    @function_tool
-    def call_for_list(person: Person) -> str:
-        """Phone the cook (or anyone at home) to take this week's grocery list."""
-        return f"Calling now (job {kitchen.weekly_call(person)})."
+        @function_tool
+        def check_in(patient: Person, purpose: str) -> str:
+            """Phone a family member to check in: how they feel and what to ask the doctor."""
+            return f"Calling now (job {health.checkin(patient, purpose)})."
 
-    people = ", ".join(f"{k}: {v['name']}" for k, v in hh["people"].items())
-    clinics = ", ".join(f"{k}: {v['doctor']}, {v['clinic']}" for k, v in hh["clinics"].items())
+        @function_tool
+        def call_for_list(person: Person) -> str:
+            """Phone the cook (or anyone at home) to take this week's grocery list."""
+            return f"Calling now (job {kitchen.weekly_call(person)})."
+        tools += [check_in, call_for_list]
+
+    people = ", ".join(f"{k}: {v['name']}" for k, v in (hh.get("people") or {}).items()) or "none listed yet"
+    clinics = ", ".join(f"{k}: {v['doctor']}, {v['clinic']}" for k, v in (hh.get("clinics") or {}).items()) or \
+        "none saved yet (to book, the family first adds a doctor in Book a doctor > Add a doctor)"
     return Agent(name="Pathya",
                  instructions=CONCIERGE.format(user=hh["user"]["name"], people=people, clinics=clinics,
                                                now=datetime.now(IST).strftime("%a %d %b %Y %H:%M")),
-                 tools=[order_groceries, book_doctor, check_in, call_for_list],
+                 tools=tools,
                  **({"model": os.environ["OPENAI_MODEL"]} if os.getenv("OPENAI_MODEL") else {}))

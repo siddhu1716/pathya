@@ -82,7 +82,7 @@ Work from the top down. If something still fails after 10 minutes, write it down
 - [ ] **Get Razorpay test keys.**
   - In the Dashboard, switch to Test mode and open API keys.
   - Test keys need no website. Live keys need website verification or KYC, so they are not an overnight option.
-- [ ] **Optional, for QuickPick Kitchen:**
+- [ ] **Optional, for Pathya Kitchen:**
   - Connect the Instamart MCP server from Swiggy Builders Club on localhost (sign in with phone and OTP).
   - Search with the venue address to check that delivery reaches RMZ The Loft.
 - [ ] **Run the smoke tests** in section 6.
@@ -380,7 +380,7 @@ builders-2026/
 - **Treat the repo as your portfolio.** Equal AI says it is hiring from this room, so give it a clear README, tests for the rules engine, traces and clean commits.
 - **Clean your public GitHub before you leave:**
   - Pin your best repos.
-  - In QuickPick, remove the committed `myenv/` and `__pycache__/` folders.
+  - Keep virtual environments and `__pycache__/` folders out of the repository.
   - Fix the licence mismatch: the README says MIT, but GitHub shows Apache-2.0.
 - **Have a short intro ready.** Update your LinkedIn headline, and practise one line such as: "ML engineer in Hyderabad, building voice agents that take real actions safely."
 - **Ask Equal's engineers real questions.**

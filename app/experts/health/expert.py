@@ -77,7 +77,7 @@ def _esc(s):
 
 def make_ics(uid, start, minutes, title, location, notes=""):
     utc = lambda d: d.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    rows = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//QuickPick//Experts//EN", "BEGIN:VEVENT",
+    rows = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Pathya//Experts//EN", "BEGIN:VEVENT",
             f"UID:{uid}@quickpick", f"DTSTAMP:{utc(datetime.now(timezone.utc))}", f"DTSTART:{utc(start)}",
             f"DTEND:{utc(start + timedelta(minutes=minutes))}", f"SUMMARY:{_esc(title)}",
             f"LOCATION:{_esc(location)}", f"DESCRIPTION:{_esc(notes)}", "BEGIN:VALARM", "TRIGGER:-PT2H",
@@ -86,8 +86,15 @@ def make_ics(uid, start, minutes, title, location, notes=""):
 
 
 def wa_link(phone, text):
-    """A WhatsApp draft; the human presses send."""
-    return f"https://wa.me/{''.join(c for c in str(phone) if c.isdigit())}?text={urllib.parse.quote(text)}"
+    """A WhatsApp draft; the human presses send. No number: WhatsApp opens and they pick the contact."""
+    return f"https://wa.me/{''.join(c for c in str(phone or '') if c.isdigit())}?text={urllib.parse.quote(text)}"
+
+
+def share_payload(text, phone=None):
+    """How a brief (already through safety.check) can be shared: a WhatsApp draft, or with a doctor in a PharmEasy
+    online consultation (the app copies the brief so it can be pasted into the consultation; nothing is sent for them)."""
+    from app.experts.health.finder import ONLINE
+    return {"wa": wa_link(phone, text), "consult": ONLINE[0]}
 
 
 def e164_or(number, fallback):
@@ -342,13 +349,13 @@ class HealthExpert(Expert):
         verdict = safety.check(text)
         warnings = {"blocked": ["The safety check held part of this brief. Review it before sharing."],
                     "unchecked": ["Safety check is off (set GUARDRAIL_ID)."]}.get(verdict.status, [])
-        phone = self.hh["clinics"].get(pat.get("clinic", ""), {}).get("phone")
+        clinic = self.hh["clinics"].get(pat.get("clinic", "")) or {}
         return Card(self.name, "brief", f"Doctor brief for {pat['name']}", verdict.text.split("\n"),
-                    question="Share it with the clinic?",
-                    choices=[{"id": "share", "label": "WhatsApp draft"}, {"id": "ok", "label": "Keep"}],
+                    question="Share it with the doctor?",
+                    choices=[{"id": "share", "label": f"WhatsApp {clinic['clinic'].split(',')[0]}" if clinic.get("phone")
+                              else "WhatsApp"}, {"id": "ok", "label": "Keep"}],
                     warnings=warnings,
-                    payload={"text": verdict.text, "safety": verdict.status,
-                             "wa": wa_link(phone, verdict.text) if phone else None})
+                    payload={"text": verdict.text, "safety": verdict.status, **share_payload(verdict.text, clinic.get("phone"))})
 
     def meds_card(self, patient, rx, photo=None):
         """rx is the prescription reader's output. Nothing is scheduled until a human confirms. photo: the stored
@@ -425,7 +432,10 @@ class HealthExpert(Expert):
             return {"ok": True, "message": "Discarded. Nothing was saved, and the photo was deleted."}
         if kind == "followup" and choice == "book":
             start = next_at(7)
-            return {"ok": True, "jobs": [self.book(p["patient"], self.person(p["patient"]).get("clinic") or next(iter(self.hh["clinics"])),
+            clinic = self.person(p["patient"]).get("clinic") or next(iter(self.hh["clinics"]), None)
+            if clinic not in self.hh["clinics"]:
+                return {"ok": False, "error": "No doctor saved yet: add one in Book a doctor > Add a doctor, then book from there."}
+            return {"ok": True, "jobs": [self.book(p["patient"], clinic,
                                                    start.isoformat(), (start + timedelta(days=7)).isoformat(),
                                                    "morning", f"Review visit with {p.get('doctor') or 'the doctor'}")]}
         if kind == "brief" and choice == "share":

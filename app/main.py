@@ -34,7 +34,8 @@ def load_household(path=None):
     if not path.exists():
         raise RuntimeError(f"{path} not found. Copy household.example.yaml to household.yaml and fill it in.")
     hh = yaml.safe_load(path.read_text(encoding="utf-8"))
-    hh["pharmacies"] = hh.get("pharmacies") or {}         # added in the app after a tap (health/pharmacy.py)
+    for section in ("people", "clinics", "pharmacies"):      # may be empty: doctors and pharmacies are added in the app
+        hh[section] = hh.get(section) or {}
     return hh
 
 
@@ -134,8 +135,8 @@ def state(request: Request):
         "user": hh["user"]["name"],
         "language": lang_default(hh),
         "daily_call": getattr(st.experts.get("home"), "daily_hour", lambda: None)(),
-        "people": [{"key": k, "name": v["name"], "role": v.get("role", ""), "language": lang_of(hh, v)}
-                   for k, v in hh["people"].items()],
+        "people": [{"key": k, "name": v["name"], "role": v.get("role", ""), "language": lang_of(hh, v),
+                    "has_phone": bool(v.get("phone"))} for k, v in hh["people"].items()],
         "clinics": [_doctor_view(hh, k, v) for k, v in hh["clinics"].items()],
         "cards": waiting,
         "recent": store.recent_cards(),
@@ -410,7 +411,10 @@ def kitchen_call(person: str, request: Request):
     _person(request, person)
     via = _via(request)
     kitchen = _expert(request, "kitchen")
-    return {"job": kitchen.weekly_call(person, via=via) if via else kitchen.weekly_call(person)}
+    try:
+        return {"job": kitchen.weekly_call(person, via=via) if via else kitchen.weekly_call(person)}
+    except ValueError as err:
+        raise HTTPException(400, str(err))
 
 
 class Reorder(BaseModel):
@@ -1227,7 +1231,7 @@ def card_ics(aid: str, request: Request):
     if not ics:
         raise HTTPException(404, "This card has no calendar file.")
     return PlainTextResponse(ics, media_type="text/calendar",
-                             headers={"Content-Disposition": f'attachment; filename="quickpick-{aid}.ics"'})
+                             headers={"Content-Disposition": f'attachment; filename="pathya-{aid}.ics"'})
 
 
 @api.post("/jobs/{jid}/run-now")

@@ -31,15 +31,16 @@ def test_pantry_shelf_life_running_low_and_used_up():
     assert len(pantry.items(store)) == 2
 
 
-def test_delivery_stocks_the_pantry_once_and_dry_runs_too():
+def test_delivery_stocks_the_pantry_once_and_a_dry_run_never_does():
     store = Store(":memory:")
     tracker.record(store, "c1", {"lines": ["Curd 500 g x1"], "total": "₹52", "payload": {"address_id": "a"}},
                    {"order": {"orderId": "O9"}})
     assert pantry.items(store) == []                                   # placed, not delivered yet
     assert tracker.mark_delivered(store, "O9") and not tracker.mark_delivered(store, "O9")
     assert [i["name"] for i in pantry.items(store)] == ["Curd 500 g"] and store.order("O9")["delivered"]
-    tracker.record(store, "c2", {"lines": ["Bread x1"], "payload": {}}, {"dry_run": True})
-    assert {i["name"] for i in pantry.items(store)} == {"Curd 500 g", "Bread"}
+    assert tracker.record(store, "c2", {"lines": ["Bread x1"], "payload": {}}, {"dry_run": True}) == ["dry-c2"]
+    assert {i["name"] for i in pantry.items(store)} == {"Curd 500 g"}                 # nothing arrived
+    assert store.order("dry-c2")["status"] == "DRY RUN: not placed"
 
 
 def test_food_log_today():

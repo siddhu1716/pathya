@@ -246,7 +246,7 @@ def targets(hh):
 async def nutrition(store, hh, days=7, estimate=estimate_packs):
     """What the household bought in the last `days`, as estimated nutrition per person per day."""
     since = time.time() - days * 86400
-    orders = [o for o in store.orders(limit=200) if o["placed"] >= since]
+    orders = [o for o in store.orders(limit=200) if o["placed"] >= since and o["store"] != "dry run"]   # real orders only
     lines = [(parse_line(l), o["store"]) for o in orders for l in o["items"]]
     cached = {f["key"][6:]: f["value"] for f in store.facts("home", "nutri:")}
     missing = sorted({name for (name, _, _), _ in lines if slug(name) not in cached})
@@ -270,15 +270,21 @@ async def nutrition(store, hh, days=7, estimate=estimate_packs):
 
 
 def brief_text(hh, plan, nut):
-    """One page for the nutritionist: facts and estimates only, no advice."""
+    """One page for the nutritionist or doctor: facts and estimates only, no advice. Zero orders are said as such,
+    never as "0 kcal a day" (that would read as the family eating nothing)."""
     t, p = nut["targets"], nut["per_person_day"]
-    rows = [f"Nutrition brief: {hh['user']['name']}'s household ({nut['people']} people)",
-            f"From groceries bought in the last {nut['days']} days ({nut['orders']} orders), estimated per person per day: "
-            f"{p['kcal']:.0f} kcal, protein {p['protein_g']:.0f} g, carbs {p['carbs_g']:.0f} g, fat {p['fat_g']:.0f} g, "
-            f"fibre {p['fibre_g']:.0f} g.",
-            f"Reference used: {t['source']} ({t['kcal']} kcal, protein {t['protein_g']} g, fibre {t['fibre_g']} g)."]
+    rows = [f"Nutrition brief: {hh['user']['name']}'s household ({nut['people']} people)"]
+    if nut.get("orders"):
+        rows.append(f"From groceries bought in the last {nut['days']} days ({nut['orders']} orders), estimated per person "
+                    f"per day: {p['kcal']:.0f} kcal, protein {p['protein_g']:.0f} g, carbs {p['carbs_g']:.0f} g, "
+                    f"fat {p['fat_g']:.0f} g, fibre {p['fibre_g']:.0f} g.")
+    else:
+        rows.append(f"No groceries were ordered through Pathya in the last {nut['days']} days, so there is no shopping "
+                    "estimate yet.")
+    rows.append(f"Daily targets used: {t['source']} ({t['kcal']} kcal, protein {t['protein_g']} g, fibre {t['fibre_g']} g).")
     if plan:
         rows.append("Planned meals: " + " | ".join(
             f"{d['day']}: " + ", ".join(m["dish"] for m in d["meals"]) for d in plan.get("days", [])[:3]))
-    rows.append("We would like your guidance on what to change. All numbers are estimates from shopping data.")
+    rows.append("We would like your guidance on what to change. All numbers are estimates"
+                + (" from shopping data." if nut.get("orders") else "."))
     return "\n".join(rows)

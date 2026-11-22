@@ -270,7 +270,7 @@ function NutritionPanel({ state }: { state: AppState }) {
           </Button>
           {n && (
             <Button className="flex-1 h-11" disabled={share.isPending || !!brief} onClick={() => share.mutate()}>
-              Share with {data?.nutritionist?.split(" (")[0] ?? "nutritionist"}
+              Share with {data?.nutritionist ? data.nutritionist.split(" (")[0] : "nutritionist or doctor"}
             </Button>
           )}
         </div>

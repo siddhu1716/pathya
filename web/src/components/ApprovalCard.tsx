@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { CalendarPlus, ExternalLink, Loader2, Share2 } from "lucide-react";
+import { ArrowUpRight, CalendarPlus, ExternalLink, Loader2, Share2, Stethoscope } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dot, Panel, Photo, Pill } from "@/components/kit";
 import { api, CardRow } from "@/lib/api";
@@ -52,7 +52,7 @@ export function ApprovalCard({ row }: { row: CardRow }) {
       <div className="flex items-center justify-between gap-2">
         <span className="label flex items-center gap-2">
           <Dot tone={urgent ? "bad" : waiting ? "warn" : row.status === "failed" ? "bad" : "ok"} pulse={urgent} />
-          {KIND[c.kind] ?? c.kind} · {storeOf(c)}
+          {c.kind === "brief" && c.expert === "kitchen" ? "Nutrition brief" : KIND[c.kind] ?? c.kind} · {storeOf(c)}
         </span>
         {c.kind === "brief" && c.payload?.safety && SAFETY[c.payload.safety] && (
           <Pill tone={SAFETY[c.payload.safety][1]}>{SAFETY[c.payload.safety][0]}</Pill>
@@ -92,6 +92,9 @@ export function ApprovalCard({ row }: { row: CardRow }) {
       )}
 
       {c.payload?.photo && c.payload?.share_text && <SharePhoto id={c.payload.photo} text={c.payload.share_text} />}
+      {c.kind === "brief" && c.payload?.consult && c.payload?.text && (
+        <ConsultLink name={c.payload.consult.name} url={c.payload.consult.url} text={c.payload.text} />
+      )}
 
       {waiting ? (
         <div className="space-y-3">
@@ -125,6 +128,22 @@ export function ApprovalCard({ row }: { row: CardRow }) {
         <Outcome row={row} />
       )}
     </Panel>
+  );
+}
+
+/** Share a brief with a doctor in an online consultation: the brief is copied (their site can't receive it from us),
+ * then their consultation page opens; paste it into the chat with the doctor. A real link, so no pop-up blocker. */
+function ConsultLink({ name, url, text }: { name: string; url: string; text: string }) {
+  const copy = () => {
+    navigator.clipboard?.writeText(text)
+      .then(() => toast.success(`Brief copied. Paste it into the chat with your ${name} doctor.`))
+      .catch(() => toast.message(`Opening ${name}. Copy the brief above to share it with the doctor.`));
+  };
+  return (
+    <a href={url} target="_blank" rel="noreferrer" onClick={copy}
+       className="press w-full h-11 rounded-xl border flex items-center justify-center gap-2 text-[14px]">
+      <Stethoscope className="w-4 h-4" /> Share with a doctor on {name} <ArrowUpRight className="w-3.5 h-3.5 text-muted-foreground" />
+    </a>
   );
 }
 

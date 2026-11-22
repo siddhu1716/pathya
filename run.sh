@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# QuickPick backend in one command (Git Bash on Windows, macOS, Linux).
+# Pathya backend in one command (Git Bash on Windows, macOS, Linux).
 #   ./run.sh           local: http://localhost:8000, calls ring in the browser
 #   ./run.sh phone     plus a public HTTPS tunnel (cloudflared): Twilio/Exotel phone calls and the app on your phone
 #   PORT=9000 ./run.sh       BUILD=1 ./run.sh  (rebuild the web UI)
@@ -60,7 +60,7 @@ else
   export CALL_MODE=browser                                                       # overrides a stale value in .env
 fi
 
-echo "Starting QuickPick on http://localhost:$PORT (logs in $LOG) ..."
+echo "Starting Pathya on http://localhost:$PORT (logs in $LOG) ..."
 "$PY" -m uvicorn app.main:app --port "$PORT" > "$LOG" 2>&1 &
 PIDS+=($!)
 for _ in $(seq 90); do
@@ -68,6 +68,6 @@ for _ in $(seq 90); do
   [ "$code" = 200 ] || [ "$code" = 401 ] && break
   sleep 1
 done
-echo "QuickPick is up: http://localhost:$PORT$([ "$MODE" = phone ] && echo ' (on your phone: the link above)')"
+echo "Pathya is up: http://localhost:$PORT$([ "$MODE" = phone ] && echo ' (on your phone: the link above)')"
 echo "Logs: tail -f $LOG    Ctrl+C stops everything."
 wait -n "${PIDS[@]}" || true                                                     # one stopped: stop the rest

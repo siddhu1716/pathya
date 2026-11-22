@@ -1,26 +1,30 @@
-# Who QuickPick works for. Phone numbers in E.164. Only people who agreed to AI calls.
+# Who Pathya works for: copy to household.yaml and fill it in. Phone numbers in E.164 (+91 and 10 digits).
+# Only people who agreed to AI calls. Pathya calls only numbers in this file (the app adds numbers here too).
+# Twilio trial accounts can only call numbers verified in the Twilio console (or with Verify in the app).
 user:
-  name: Shiva
-  phone: "+91XXXXXXXXXX"
-people:
+  name: Your name
+  phone: "+91XXXXXXXXXX"          # your own mobile (Jio refuses Twilio's US number: use Airtel, Vi or BSNL)
+# city: Hyderabad                  # used to search for doctors and pharmacies near you
+people:                            # family members (add more in the app: Family > Add)
   amma:
     name: Amma
-    language: Telugu
-    age: 60                  # placeholder
+    language: Telugu               # the language Pathya opens their calls in
     phone: "+91XXXXXXXXXX"
-    clinic: rao
-  lakshmi:
-    name: Lakshmi garu
-    role: cook
-    language: Telugu
-    phone: "+91XXXXXXXXXX"
-clinics:
-  rao:                       # for the demo, a friend plays the receptionist
-    doctor: "Dr. Rao (placeholder)"
-    clinic: "Sunrise Clinic, Gachibowli (placeholder)"
-    phone: "+91XXXXXXXXXX"
+    # clinic: <a key under clinics>  # their usual doctor
+  # cook:                          # optional: the cook gets the grocery-list and menu calls
+  #   name: Lakshmi garu
+  #   role: cook
+  #   language: Telugu
+  #   phone: "+91XXXXXXXXXX"
+# Your doctors. Add them in the app (Book a doctor > Add a doctor), which writes them here, or by hand:
+#   rao:
+#     doctor: "Dr. K. Rao"
+#     clinic: "Clinic name, area"
+#     phone: "+914012345678"
+#     specialty: "General physician"
+clinics: {}
 # pharmacies: the app adds one here after you tap "Phone <pharmacy>" (Family > Medicines > Order these medicines)
-address_hint: Loft
+address_hint: Home                 # which saved Swiggy / Zepto address to deliver to (a word in its label)
 # Kitchen preferences for meal plans (the planner never gives diet advice; the doctor's written advice is used
 # only to choose dishes). Nutrition targets are optional: set them with your nutritionist; otherwise a general
 # reference (ICMR-NIN 2020) is shown.
@@ -29,12 +33,10 @@ kitchen:
   diet: vegetarian
   cuisine: Telugu home food
   budget_week: 3000
-# nutrition_targets: {kcal: 1800, protein_g: 60, fibre_g: 30, source: "set with Dr. X, Nov 2026"}
-nutritionist:
-  name: "Nutritionist (placeholder)"
-  phone: "+91XXXXXXXXXX"
+# nutrition_targets: {kcal: 1800, protein_g: 60, fibre_g: 30, source: "set with your nutritionist, Nov 2026"}
+# nutritionist:                    # optional: the nutrition brief's WhatsApp button goes straight to them
+#   name: "Your nutritionist"
+#   phone: "+91XXXXXXXXXX"
 # What the Doorstep Expert tells a delivery partner who calls (never OTPs, payment or IDs).
 delivery_instructions: >-
-  Equal AI office, 3rd floor, RMZ The Loft, Raidurg. Show the order at the ground-floor security desk,
-  take the lift to the 3rd floor and ask reception for Shiva. If security stops you, wait at the desk:
-  Shiva will come down.
+  Ring the bell at flat 302 on the 3rd floor. If nobody answers, leave it with the security guard at the gate.

@@ -196,6 +196,7 @@ def test_health_book_and_ics(env):
     aid = store.add_card(Card("health", "booking", "Booked", ["x"], payload={"ics": "BEGIN:VCALENDAR"}).to_dict())
     r = client.get(f"/api/cards/{aid}/ics")
     assert r.status_code == 200 and r.headers["content-type"].startswith("text/calendar")
+    assert r.headers["content-disposition"] == f'attachment; filename="pathya-{aid}.ics"'
     assert client.get("/api/nope").status_code == 404
 
 

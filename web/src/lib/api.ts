@@ -104,7 +104,7 @@ export type CallRecord = {
   saved: Record<string, any>;
 };
 
-export type Person = { key: string; name: string; role: string; language: string };
+export type Person = { key: string; name: string; role: string; language: string; has_phone?: boolean };
 export type Clinic = { key: string; doctor: string; clinic: string; specialty: string; phone_hint: string | null; sees: string[] };
 export type Doctors = { saved: Clinic[]; specialties: string[]; online: { name: string; url: string; about: string }[] };
 

@@ -1,5 +1,5 @@
 """One SQLite file for the household: approvals (human taps), jobs (calls and tasks that run later),
-facts (memory shared by all Experts) and events (the journey timeline shown in the demo)."""
+facts (memory shared by all Experts) and events (the journey timeline shown in the app)."""
 import json
 import sqlite3
 import threading
@@ -62,7 +62,7 @@ class Store:
         self.db = _LockedDB(conn)
         self.db.executescript(SCHEMA)
 
-    # ---- events: what happened, when (the demo timeline) ----
+    # ---- events: what happened, when (the timeline in More > Activity) ----
     def log(self, expert, ref, what):
         self.db.execute("INSERT INTO events VALUES (?,?,?,?)", (time.time(), expert, ref, what))
 
@@ -157,7 +157,7 @@ class Store:
                         ("done" if ok else "failed", json.dumps(result, default=str), jid))
 
     def run_now(self, jid):
-        """Demo button: a scheduled job becomes due immediately."""
+        """The "Run now" button: a scheduled job becomes due immediately."""
         return self.db.execute("UPDATE jobs SET run_at=? WHERE id=? AND status='scheduled'",
                                (time.time(), jid)).rowcount == 1
 
