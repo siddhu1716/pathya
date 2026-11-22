@@ -583,28 +583,28 @@ export function FamilyStrip({ onOpen }: { onOpen: (key: string) => void }) {
   const { data: fam } = useFamily();
   if (!fam) return null;
   return (
-    <div className="flex gap-3 overflow-x-auto snap-x -mx-4 px-4 pb-1 no-scrollbar">
+    <div className="family-strip">
       {fam.members.map((m) => {
         const tone = doseTone(m.doses);
         const pending = m.doses.filter((d) => !d.taken && d.hour <= new Date().getHours()).length;
         const today = pctOf(m.today.total.kcal, m.today.targets.kcal);
         return (
           <button key={m.key} onClick={() => onOpen(m.key)}
-                  className="press snap-start shrink-0 w-[9.5rem] rounded-2xl border bg-card/80 p-3 text-left space-y-2.5">
-            <div className="flex items-center justify-between">
-              <Ring value={m.health.score} size={40} />
-              {tone && <span className="flex items-center gap-1 font-mono text-[10px] text-muted-foreground"><Dot tone={tone} />{pending ? `${pending} dose` : "meds"}</span>}
-            </div>
-            <div>
-              <p className="text-[15px] truncate">{m.key === "me" ? "You" : m.name}</p>
-              <p className="text-[12px] text-muted-foreground truncate">{m.health.label}</p>
-            </div>
-            <div className="space-y-1">
-              <div className="h-1 rounded-full bg-white/10 overflow-hidden">
-                <div className={cn("h-full", today >= 90 ? "bg-success" : "bg-foreground/70")} style={{ width: `${Math.min(100, today)}%` }} />
-              </div>
-              <p className="font-mono text-[10px] text-muted-foreground">today {today}% of energy</p>
-            </div>
+                  className="family-summary press text-left">
+            {m.health.score == null
+              ? <span className="member-initial" aria-hidden="true">{initials(m.name)}</span>
+              : <span aria-label={`Habit score ${m.health.score} of 100`} role="img"><Ring value={m.health.score} size={40} /></span>}
+            <span className="min-w-0">
+              <span className="block font-medium truncate">{m.key === "me" ? "You" : m.name}</span>
+              <span className="block text-xs text-muted-foreground">{m.health.label}</span>
+            </span>
+            <span className="member-energy">
+              <span className="block h-1 rounded-full bg-white/10 overflow-hidden">
+                <span className={cn("block h-full", today >= 90 ? "bg-success" : "bg-primary/70")} style={{ width: `${Math.min(100, today)}%` }} />
+              </span>
+              <span className="mt-1 block text-xs text-muted-foreground">{today}% of energy target</span>
+            </span>
+            {tone && <span className="col-span-full flex items-center gap-1.5 text-xs text-muted-foreground"><Dot tone={tone} />{pending ? `${pending} pending ${pending === 1 ? "dose" : "doses"}` : "Medicines"}</span>}
           </button>
         );
       })}

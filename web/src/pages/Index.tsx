@@ -8,10 +8,11 @@ import { ApprovalCard } from "@/components/ApprovalCard";
 import { CallHistory } from "@/components/CallHistory";
 import { FamilyStrip, FamilyTab } from "@/components/FamilyTab";
 import { KitchenTab } from "@/components/KitchenTab";
+import { Wordmark } from "@/components/Wordmark";
 import { Dot, Panel, Pill, Row, Section } from "@/components/kit";
 import { LiveCallBanner } from "@/components/LiveCall";
 import { OrderTracker } from "@/components/OrderTracker";
-import { CallSettings, Forwarding, QuickActions } from "@/components/QuickActions";
+import { CallMe, CallSettings, Forwarding, QuickActions } from "@/components/QuickActions";
 import { VoicePanel } from "@/components/VoiceSettings";
 import { PhoneIncoming } from "lucide-react";
 import { Timeline } from "@/components/Timeline";
@@ -93,17 +94,19 @@ function Connect({ error }: { error: string }) {
   const [mode, setMode] = useState<"phone" | "link">("phone");
   const phoneOk = !!auth?.phone_sign_in;
   return (
-    <div className="min-h-[100dvh] max-w-sm mx-auto px-6 flex flex-col justify-center gap-4">
-      <span className="w-10 h-10 rounded-lg bg-primary text-primary-foreground flex items-center justify-center text-[15px] font-semibold">P</span>
-      {phoneOk && mode === "phone" ? <PhoneSignIn onLink={() => setMode("link")} /> : (
-        <>
-          <h1 className="text-[22px] font-medium tracking-tight">Connect to Pathya</h1>
-          {!/key needed/i.test(error) && <p className="text-[14px] text-muted-foreground">{error}</p>}
-          <LinkForm />
-          {phoneOk && <button className="text-[14px] text-muted-foreground underline underline-offset-4" onClick={() => setMode("phone")}>Sign in with your phone number</button>}
-        </>
-      )}
-    </div>
+    <main className="entry-screen">
+      <div className="entry-card">
+        <div className="entry-brand"><Wordmark /><img src="/thali.webp" alt="" width="144" height="144" /></div>
+        {phoneOk && mode === "phone" ? <PhoneSignIn onLink={() => setMode("link")} /> : (
+          <>
+            <h1 className="text-[22px] font-medium tracking-tight">Connect to Pathya</h1>
+            {!/key needed/i.test(error) && <p className="text-[14px] text-muted-foreground">{error}</p>}
+            <LinkForm />
+            {phoneOk && <button className="text-[14px] text-muted-foreground underline underline-offset-4" onClick={() => setMode("phone")}>Sign in with your phone number</button>}
+          </>
+        )}
+      </div>
+    </main>
   );
 }
 
@@ -131,14 +134,14 @@ function PhoneSignIn({ onLink }: { onLink: () => void }) {
       </p>
       {!sentTo ? (
         <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); if (phone.trim()) start.mutate("sms"); }}>
-          <input className={field} type="tel" inputMode="tel" autoComplete="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="98480 22338" autoFocus />
+          <input className={field} aria-label="Phone number" type="tel" inputMode="tel" autoComplete="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="98480 22338" autoFocus />
           <Button type="submit" className="w-full h-12" disabled={start.isPending || phone.replace(/\D/g, "").length < 10}>
             {start.isPending && <Loader2 className="animate-spin" />} Send code
           </Button>
         </form>
       ) : (
         <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); if (code.trim()) check.mutate(); }}>
-          <input className={cn(field, "font-mono tracking-[0.3em] text-center text-[20px]")} inputMode="numeric" autoComplete="one-time-code"
+          <input className={cn(field, "font-mono tracking-[0.3em] text-center text-[20px]")} aria-label="Verification code" inputMode="numeric" autoComplete="one-time-code"
                  value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="••••••" autoFocus />
           <Button type="submit" className="w-full h-12" disabled={check.isPending || code.length < 4}>
             {check.isPending && <Loader2 className="animate-spin" />} Sign in
@@ -171,8 +174,8 @@ function LinkForm() {
         connect(s2, k2);
         window.location.reload();
       }}>
-        <input className={field} value={srv} onChange={(e) => setSrv(e.target.value)} placeholder="https://….trycloudflare.com/?key=…" />
-        <input className={field} value={k} onChange={(e) => setK(e.target.value)} placeholder="Key (if not in the link)" />
+        <input className={field} aria-label="Pathya link" value={srv} onChange={(e) => setSrv(e.target.value)} placeholder="https://….trycloudflare.com/?key=…" />
+        <input className={field} aria-label="Access key" value={k} onChange={(e) => setK(e.target.value)} placeholder="Key (if not in the link)" />
         <Button type="submit" className="w-full h-12">Connect</Button>
       </form>
     </>
@@ -220,7 +223,7 @@ function HomeSkeleton() {
   return (
     <div className="min-h-[100dvh] max-w-xl mx-auto px-4 pt-20 space-y-7" aria-label="Loading">
       <div className="space-y-3"><div className="skeleton h-10 w-3/4" /><div className="skeleton h-4 w-1/2" /></div>
-      <div className="flex gap-3">{[0, 1, 2].map((i) => <div key={i} className="skeleton h-32 w-36 shrink-0" />)}</div>
+      <div className="flex gap-3">{[0, 1, 2].map((i) => <div key={i} className="skeleton h-32 min-w-0 flex-1" />)}</div>
       <div className="grid grid-cols-2 gap-3">{[0, 1, 2, 3].map((i) => <div key={i} className="skeleton h-28" />)}</div>
     </div>
   );
@@ -249,16 +252,15 @@ const Index = () => {
   return (
     <div className="min-h-[100dvh] bg-background">
       <header className={cn("sticky top-0 z-40 glass border-b hairline transition-transform duration-300 ease-out", hideHeader && "-translate-y-full")}>
-        <div className="max-w-xl mx-auto px-4 h-14 flex items-center justify-between">
-          <button className="flex items-center gap-2.5" onClick={() => go("home")}>
-            <span className="w-7 h-7 rounded-md bg-primary text-primary-foreground flex items-center justify-center text-[13px] font-semibold">P</span>
-            <span className="text-[15px] font-medium tracking-tight">Pathya</span>
+        <div className="shell-width mx-auto px-4 min-h-16 flex items-center justify-between">
+          <button className="min-h-11 flex items-center" aria-label="Pathya home" onClick={() => go("home")}>
+            <Wordmark />
           </button>
           <div className="flex items-center gap-2">
             {s.live.length > 0 && <Pill tone="ok"><Dot tone="ok" pulse /> On a call</Pill>}
             {s.dry_run && <Pill tone="warn">Dry run</Pill>}
             <button aria-label="Scan a photo" onClick={() => setScanning(true)}
-                    className="w-9 h-9 rounded-full border flex items-center justify-center active:bg-white/5">
+                    className="w-11 h-11 rounded-full border bg-card flex items-center justify-center active:bg-white/5">
               <Camera className="w-4 h-4" />
             </button>
           </div>
@@ -266,7 +268,7 @@ const Index = () => {
       </header>
       <ScanSheet open={scanning} onClose={() => setScanning(false)} />
 
-      <main key={tab} className="max-w-xl mx-auto px-4 pt-6 pb-28 space-y-8 stagger">
+      <main key={tab} className={cn("page-content mx-auto px-4 pt-5 pb-28 space-y-7", tab === "home" ? "shell-width" : "max-w-2xl")}>
         {s.live.map((c) => <LiveCallBanner key={c.id} call={c} />)}
         {s.ringing.map((j) => (
           <a key={j.id} href={`/call/${j.id}`} className="flex items-center gap-3 rounded-2xl border border-success/40 bg-success/5 px-4 py-3.5">
@@ -278,25 +280,20 @@ const Index = () => {
 
         {tab === "home" && (
           <>
-            <div className="space-y-2.5 px-1 pt-1">
-              <p className="label">{new Date().toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" })}</p>
-              <h1 className="display">
-                {`${hello}, ${s.user}.`.split(" ").map((w, i) => (
-                  <span key={i}><span className="word" style={{ animationDelay: `${120 + i * 70}ms` }}>{w}</span>{" "}</span>
-                ))}
-              </h1>
-              <p className="text-[15px] text-muted-foreground max-w-[30ch]">
-                {cards.length ? `${cards.length} ${cards.length === 1 ? "thing needs" : "things need"} you. Everything else is in hand.`
-                  : "The right food and care for everyone at home."}
-              </p>
+            <div className="home-hero">
+              <div className="hero-copy">
+                <p className="hero-date">{new Date().toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" })}</p>
+                <h1 className="display">{hello}, <span>{s.user}.</span></h1>
+                <p className="hero-description">{cards.length
+                  ? `${cards.length} ${cards.length === 1 ? "card is" : "cards are"} waiting for your review.`
+                  : "Check in about meals, medicines or groceries by phone."}</p>
+                <div className="hero-controls"><CallMe state={s} /><span>in {s.language}</span></div>
+              </div>
+              <img className="hero-thali" alt="" src="/thali.webp" width="720" height="720" />
             </div>
 
-            <Section label="Family" right={<button className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground" onClick={() => go("family")}>All</button>}>
-              <FamilyStrip onOpen={(k) => { setMember(k); go("family"); }} />
-            </Section>
-
             {cards.length > 0 && (
-              <Section label={`Needs you · ${cards.length}`}>
+              <Section label={`For your review · ${cards.length}`}>
                 <div className="space-y-3">{cards.map((row) => <ApprovalCard key={row.id} row={row} />)}</div>
               </Section>
             )}
@@ -307,7 +304,12 @@ const Index = () => {
               </Section>
             )}
 
-            <Section label="Do something"><QuickActions state={s} onScan={() => setScanning(true)} onMeals={() => go("meals")} /></Section>
+            <div className="home-sections">
+              <Section label="Your family" right={<button className="section-link" onClick={() => go("family")}>View family →</button>}>
+                <FamilyStrip onOpen={(k) => { setMember(k); go("family"); }} />
+              </Section>
+              <Section label="Quick actions"><QuickActions state={s} onScan={() => setScanning(true)} onMeals={() => go("meals")} /></Section>
+            </div>
 
             {s.jobs.length > 0 && (
               <Section label="Up next"><UpNext jobs={s.jobs} ringing={[]} people={s.people} /></Section>
@@ -347,18 +349,18 @@ const Index = () => {
         )}
       </main>
 
-      <nav className="fixed bottom-0 inset-x-0 z-40 border-t hairline glass pb-[env(safe-area-inset-bottom)]">
+      <nav aria-label="Main navigation" className="fixed bottom-0 inset-x-0 z-40 border-t hairline glass pb-[env(safe-area-inset-bottom)]">
         <div className="max-w-xl mx-auto grid grid-cols-5">
           {TABS.map((t) => {
             const badge = t.id === "home" ? cards.length : t.id === "orders" ? active.length : 0;
             return (
-              <button key={t.id} onClick={() => go(t.id)}
+              <button key={t.id} aria-current={tab === t.id ? "page" : undefined} onClick={() => go(t.id)}
                       className={cn("press h-16 flex flex-col items-center justify-center gap-1 relative",
-                        tab === t.id ? "text-foreground" : "text-muted-foreground")}>
-                <span className={cn("absolute top-0 h-[2px] w-7 rounded-full bg-foreground transition-transform duration-300 ease-out",
+                        tab === t.id ? "text-primary" : "text-muted-foreground")}>
+                <span className={cn("absolute top-0 h-[2px] w-7 rounded-full bg-primary transition-transform duration-300 ease-out",
                   tab === t.id ? "scale-x-100" : "scale-x-0")} />
                 <t.icon className="w-5 h-5" strokeWidth={tab === t.id ? 2 : 1.5} />
-                <span className="font-mono text-[10px] uppercase tracking-wider">{t.label}</span>
+                <span className="text-[12px] font-medium">{t.label}</span>
                 {badge > 0 && (
                   <span className="absolute top-2.5 left-1/2 ml-2 min-w-4 h-4 px-1 rounded-full bg-primary text-primary-foreground text-[10px] leading-4 text-center">{badge}</span>
                 )}

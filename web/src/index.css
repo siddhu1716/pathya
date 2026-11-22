@@ -2,61 +2,73 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Pathya Experts - minimal dark theme (one theme; phone-first). HSL values, used by the shadcn components. */
+@font-face {
+  font-family: "DM Sans";
+  font-style: normal;
+  font-weight: 100 1000;
+  font-display: swap;
+  src: url("/fonts/dm-sans-latin-wght-normal.woff2") format("woff2");
+}
 
+@font-face {
+  font-family: "Spectral";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("/fonts/spectral-latin-500-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Noto Serif Telugu";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/fonts/noto-serif-telugu-telugu-600-normal.woff2") format("woff2");
+}
+
+/* Shared dark theme for the dashboard, approval cards and call sheets. */
 @layer base {
   :root {
-    --background: 0 0% 2%;
-    --foreground: 0 0% 96%;
-
-    --card: 0 0% 4.5%;
-    --card-foreground: 0 0% 96%;
-    --card-hover: 0 0% 7%;
-
-    --popover: 0 0% 6%;
-    --popover-foreground: 0 0% 96%;
-
-    --primary: 0 0% 98%;
-    --primary-foreground: 0 0% 4%;
-    --primary-glow: 0 0% 98%;
-
-    --success: 152 60% 48%;
-    --success-foreground: 0 0% 4%;
-    --success-glow: 152 60% 48%;
-
-    --warning: 38 92% 58%;
-    --warning-foreground: 0 0% 4%;
-    --warning-glow: 38 92% 58%;
-
-    --destructive: 0 72% 58%;
-    --destructive-foreground: 0 0% 98%;
-
-    --secondary: 0 0% 9%;
-    --secondary-foreground: 0 0% 96%;
-    --muted: 0 0% 9%;
-    --muted-foreground: 0 0% 56%;
-    --accent: 0 0% 11%;
-    --accent-foreground: 0 0% 96%;
-
-    --voice-idle: 0 0% 98%;
-    --voice-listening: 152 60% 48%;
-    --voice-processing: 38 92% 58%;
-    --voice-success: 152 60% 48%;
-    --voice-error: 0 72% 58%;
-
-    --border: 0 0% 12%;
-    --input: 0 0% 14%;
-    --ring: 0 0% 45%;
-
-    /* Flat on purpose: no gradients, no glows. */
-    --gradient-primary: hsl(0 0% 98%);
-    --gradient-success: hsl(152 60% 48%);
-    --gradient-hero: hsl(0 0% 98%);
-    --gradient-card: hsl(0 0% 4.5%);
+    --background: 143 19% 8%;
+    --foreground: 45 36% 93%;
+    --card: 141 15% 12%;
+    --card-foreground: var(--foreground);
+    --card-hover: 140 16% 16%;
+    --popover: 143 14% 14%;
+    --popover-foreground: var(--foreground);
+    --primary: 72 61% 76%;
+    --primary-foreground: 133 29% 12%;
+    --primary-glow: var(--primary);
+    --success: 153 53% 67%;
+    --success-foreground: 149 28% 10%;
+    --success-glow: var(--success);
+    --warning: 42 89% 70%;
+    --warning-foreground: 36 45% 12%;
+    --warning-glow: var(--warning);
+    --destructive: 4 78% 71%;
+    --destructive-foreground: 0 38% 12%;
+    --secondary: 138 14% 17%;
+    --secondary-foreground: var(--foreground);
+    --muted: var(--secondary);
+    --muted-foreground: 105 10% 73%;
+    --accent: 132 18% 20%;
+    --accent-foreground: var(--foreground);
+    --voice-idle: var(--primary);
+    --voice-listening: var(--success);
+    --voice-processing: var(--warning);
+    --voice-success: var(--success);
+    --voice-error: var(--destructive);
+    --border: 128 11% 24%;
+    --input: 128 10% 33%;
+    --ring: var(--primary);
+    --gradient-primary: hsl(var(--primary));
+    --gradient-success: hsl(var(--success));
+    --gradient-hero: hsl(var(--card-hover));
+    --gradient-card: hsl(var(--card));
     --shadow-sm: none;
     --shadow-md: none;
-    --shadow-lg: none;
-    --shadow-xl: none;
+    --shadow-lg: 0 8px 32px #080c0829;
+    --shadow-xl: 0 12px 40px #080c0833;
     --shadow-voice: none;
     --shadow-success: none;
 
@@ -118,60 +130,137 @@
   }
 }
 
-/* Premium layer (skills/premium-frontend-ui, adapted for a phone app used by elders): motion animates only transform
-   and opacity, nothing moves for people who ask for reduced motion, no glow anywhere. */
 @layer components {
-  @keyframes rise {
-    from { opacity: 0; transform: translate3d(0, 10px, 0); }
-    to { opacity: 1; transform: none; }
+  .shell-width { max-width: 68rem; }
+  .glass { background: hsl(var(--background) / 0.96); }
+  .hairline { border-color: hsl(var(--border)); }
+  .wordmark {
+    display: inline-flex;
+    align-items: center;
+    gap: .7rem;
+    color: hsl(var(--foreground));
+    font: 500 1.6rem/1 "Spectral", Georgia, serif;
+    letter-spacing: -.045em;
   }
-  @keyframes word-in {
-    from { opacity: 0; transform: translate3d(0, 0.4em, 0); }
-    to { opacity: 1; transform: none; }
+  .wordmark [lang] {
+    color: hsl(var(--primary));
+    font: 600 1.8rem/1.4 "Noto Serif Telugu", "Nirmala UI", serif;
+    border-right: 1px solid hsl(var(--border));
+    padding: .16em .4em 0 0;
+    letter-spacing: normal;
   }
-  @keyframes breathe {
-    0%, 100% { opacity: 0.45; }
-    50% { opacity: 0.8; }
+  .home-hero {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+    border: 1px solid #556848;
+    border-radius: 1.5rem;
+    background: linear-gradient(112deg, #283d2d 4%, #344c36 65%, #536144);
   }
-
-  .rise { animation: rise 0.45s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
-  .stagger > * { animation: rise 0.5s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
-  .stagger > *:nth-child(2) { animation-delay: 45ms; }
-  .stagger > *:nth-child(3) { animation-delay: 90ms; }
-  .stagger > *:nth-child(4) { animation-delay: 135ms; }
-  .stagger > *:nth-child(5) { animation-delay: 180ms; }
-  .stagger > *:nth-child(6) { animation-delay: 225ms; }
-  .stagger > *:nth-child(n + 7) { animation-delay: 270ms; }
-  .word { display: inline-block; animation: word-in 0.6s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
-
-  /* Tactile press: things you tap give a little. Hover only where there is a real pointer. */
-  .press { transition: transform 0.16s cubic-bezier(0.2, 0.7, 0.2, 1), background-color 0.16s, border-color 0.16s; }
-  .press:active { transform: scale(0.97); }
-  @media (hover: hover) and (pointer: fine) {
-    .press:hover { background-color: hsl(var(--card-hover)); border-color: rgb(255 255 255 / 0.14); }
+  .hero-copy {
+    position: relative;
+    z-index: 1;
+    width: 66%;
+    max-width: 43rem;
+    padding: clamp(1.2rem, 4.4vw, 3.5rem);
+    padding-right: 0;
+    overflow-wrap: anywhere;
   }
-
-  .display { font-size: clamp(30px, 8.6vw, 44px); line-height: 1.04; letter-spacing: -0.035em; font-weight: 500; }
-  .glass { background-color: hsl(var(--background) / 0.72); backdrop-filter: blur(18px) saturate(140%); -webkit-backdrop-filter: blur(18px) saturate(140%); }
-  .hairline { border-color: rgb(255 255 255 / 0.07); }
-  .skeleton { border-radius: 1rem; background-color: hsl(0 0% 8%); animation: breathe 1.4s ease-in-out infinite; }
+  .hero-date { color: #d8e7bc; font-size: .78rem; font-weight: 600; letter-spacing: .045em; }
+  .display, .section-heading, .entry-card h1, .page-content h1 {
+    font-family: "Spectral", Georgia, serif;
+    font-weight: 500;
+    letter-spacing: -.038em;
+  }
+  .display { margin-block: .65rem .6rem; font-size: clamp(2.15rem, 5.3vw, 4.2rem); line-height: 1.05; }
+  .display span { color: #e0edbc; }
+  .hero-description { max-width: 37ch; color: #e0e5d8; font-size: clamp(.9rem, 1.5vw, 1.05rem); }
+  .hero-controls { display: flex; align-items: center; gap: .85rem; flex-wrap: wrap; margin-top: 1.1rem; }
+  .hero-controls > span { color: #e0e5d8; font-size: .85rem; }
+  .call-action {
+    @apply inline-flex min-h-11 items-center gap-2 rounded-full bg-primary px-5 font-semibold text-primary-foreground;
+    transition: background-color .15s, transform .15s;
+  }
+  .call-action:hover { background: #e1efb6; }
+  .call-action:active { transform: translateY(1px); }
+  .call-action:disabled { opacity: .7; }
+  .hero-thali {
+    position: absolute;
+    z-index: -1;
+    top: 50%;
+    right: -3%;
+    width: 38%;
+    height: auto;
+    transform: translateY(-44%) rotate(-12deg);
+    filter: drop-shadow(0 10px 12px #13271cad);
+  }
+  .section-heading { font-size: 1.55rem; line-height: 1.25; }
+  .section-link { @apply min-h-11 text-sm font-medium text-primary; }
+  .section-link:hover { text-decoration: underline; }
+  .home-sections { display: grid; gap: 1.5rem; align-items: start; }
+  .home-sections > * { min-width: 0; }
+  .action-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .65rem; }
+  .action-tile {
+    @apply flex flex-col items-start gap-3 rounded-2xl border bg-card p-4 text-left;
+  }
+  .action-tile:last-child { grid-column: 1 / -1; flex-direction: row; align-items: center; }
+  .action-icon {
+    @apply grid size-10 shrink-0 place-items-center rounded-xl;
+    color: #d7e7ac;
+    background: #384432;
+  }
+  .action-tile:nth-child(2) .action-icon, .action-tile:nth-child(4) .action-icon { color: #edc9a1; background: #483c30; }
+  .family-strip { display: flex; gap: .65rem; overflow-x: auto; scroll-snap-type: x proximity; padding: 3px; }
+  .family-summary {
+    @apply grid shrink-0 min-w-0 items-center gap-x-2.5 gap-y-2 rounded-2xl border bg-card p-3;
+    grid-template-columns: auto minmax(0, 1fr);
+    width: 10.8rem;
+    scroll-snap-align: start;
+  }
+  .member-initial {
+    @apply grid size-10 place-items-center rounded-full bg-accent text-primary;
+    font: 500 1.25rem/1 "Spectral", Georgia, serif;
+  }
+  .member-energy { grid-column: 1 / -1; }
+  .home-sections section > div:first-child { min-height: 2.75rem; }
+  .entry-screen { @apply grid min-h-[100dvh] place-items-center px-4 py-8; }
+  .entry-card { @apply flex w-full max-w-md flex-col gap-4 overflow-hidden rounded-3xl border bg-card p-6; }
+  .entry-brand { @apply relative -mx-6 -mt-6 mb-2 flex min-h-28 items-center overflow-hidden border-b bg-accent px-6; }
+  .entry-brand img { position: absolute; right: -1.6rem; bottom: -2.3rem; width: 9rem; transform: rotate(-12deg); }
+  .entry-card h1 { font-size: 2rem; line-height: 1.1; }
+  .skeleton { border-radius: 1rem; background: hsl(var(--card-hover)); }
   .no-scrollbar { scrollbar-width: none; }
   .no-scrollbar::-webkit-scrollbar { display: none; }
+  .press { transition: background-color .16s, border-color .16s, transform .16s; }
+  .press:active { transform: scale(.985); }
+  @media (hover: hover) and (pointer: fine) {
+    .press:hover { background: hsl(var(--card-hover)); border-color: hsl(var(--input)); }
+  }
+  @media (min-width: 48rem) {
+    .hero-thali { right: 3%; width: 33%; }
+    .hero-copy { min-height: 17rem; }
+    .home-sections { grid-template-columns: 1fr 1.45fr; gap: 2rem; }
+    .family-strip { display: grid; padding: 0; overflow: visible; }
+    .family-summary { width: 100%; grid-template-columns: auto minmax(0, 1fr) minmax(5rem, .9fr); min-height: 4.65rem; }
+    .member-energy { grid-column: auto; }
+    .action-tile { flex-direction: row; align-items: center; }
+  }
+  @media (max-width: 30rem) {
+    .hero-thali { width: 49%; right: -15%; }
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .page-content, .rise, .stagger > * { animation: fade-in .18s ease-out; }
+    .skeleton { animation: soft-pulse 1.8s ease-in-out infinite; }
+  }
 }
 
-/* Film grain over the flat black, so the dark reads as a surface rather than a void. */
-body::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  z-index: 60;
-  pointer-events: none;
-  opacity: 0.04;
-  mix-blend-mode: overlay;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
-}
-
+:focus-visible { outline: 2px solid hsl(var(--ring)) !important; outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) {
-  .rise, .stagger > *, .word, .skeleton, .fade-in, .slide-up { animation: none !important; }
-  .press:active { transform: none; }
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .press:active, .call-action:active { transform: none; }
 }

@@ -10,7 +10,7 @@ export function Section({ label, right, children, className }: {
   return (
     <section className={cn("space-y-3", className)}>
       <div className="flex items-center justify-between px-1">
-        <h2 className="label">{label}</h2>
+        <h2 className="section-heading">{label}</h2>
         {right}
       </div>
       {children}
@@ -34,7 +34,7 @@ export function Row({ icon: Icon, title, sub, right, onClick, disabled }: {
       </span>
       <span className="flex-1 min-w-0">
         <span className="block text-[15px] leading-tight">{title}</span>
-        {sub && <span className="block text-[13px] text-muted-foreground truncate mt-0.5">{sub}</span>}
+        {sub && <span className="block text-[13px] text-muted-foreground mt-0.5">{sub}</span>}
       </span>
       {right ?? <ChevronRight className="w-4 h-4 text-muted-foreground" />}
     </button>

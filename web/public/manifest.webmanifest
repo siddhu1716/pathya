@@ -3,8 +3,8 @@
   "short_name": "Pathya",
   "description": "Family nutrition, from a phone call to the plate.",
   "display": "standalone",
-  "background_color": "#050505",
-  "theme_color": "#050505",
+  "background_color": "#111914",
+  "theme_color": "#111914",
   "orientation": "portrait",
   "icons": [
     {

@@ -3,6 +3,7 @@ import { useParams } from "react-router-dom";
 import { Loader2, Phone, PhoneOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dot } from "@/components/kit";
+import { Wordmark } from "@/components/Wordmark";
 import { Bubbles } from "@/components/LiveCall";
 import { api, apiFetch } from "@/lib/api";
 
@@ -166,7 +167,7 @@ export default function CallPage() {
           {phase === "ended" && "Call ended"}
           {phase === "error" && "Could not connect"}
         </span>
-        <p className="text-[28px] font-medium tracking-tight">Pathya</p>
+        <Wordmark />
         <p className="text-[14px] text-muted-foreground">{info ? `${info.expert} · talking with ${info.who} for ${info.user}` : " "}</p>
       </div>
 
@@ -182,7 +183,7 @@ export default function CallPage() {
         {phase === "ringing" && info && (
           <>
             <div className="flex flex-col items-center gap-2">
-              <Button className="h-16 w-16 rounded-full bg-destructive text-white hover:bg-destructive/90" onClick={decline} aria-label="Decline">
+              <Button className="h-16 w-16 rounded-full bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={decline} aria-label="Decline">
                 <PhoneOff className="!size-6" />
               </Button>
               <span className="text-[12px] text-muted-foreground">Decline</span>
@@ -197,7 +198,7 @@ export default function CallPage() {
         )}
         {(phase === "connecting" || phase === "live") && (
           <div className="flex flex-col items-center gap-2">
-            <Button className="h-16 w-16 rounded-full bg-destructive text-white hover:bg-destructive/90" onClick={hangUp} aria-label="Hang up">
+            <Button className="h-16 w-16 rounded-full bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={hangUp} aria-label="Hang up">
               {phase === "connecting" ? <Loader2 className="!size-6 animate-spin" /> : <PhoneOff className="!size-6" />}
             </Button>
             <span className="text-[12px] text-muted-foreground">{phase === "connecting" ? "Connecting · tap to cancel" : "Hang up"}</span>

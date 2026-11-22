@@ -41,8 +41,8 @@ type Sheet = null | "groceries" | "doctor" | "ask";
 function Tile({ icon: Icon, title, sub, onClick, disabled }: { icon: typeof Camera; title: string; sub: string; onClick: () => void; disabled?: boolean }) {
   return (
     <button onClick={onClick} disabled={disabled}
-            className="press rounded-2xl border bg-card/80 p-4 text-left space-y-4 disabled:opacity-40">
-      <span className="w-10 h-10 rounded-xl border bg-white/[0.04] flex items-center justify-center"><Icon className="w-[18px] h-[18px]" strokeWidth={1.6} /></span>
+            className="action-tile press">
+      <span className="action-icon"><Icon className="w-[18px] h-[18px]" strokeWidth={1.6} /></span>
       <span className="block">
         <span className="block text-[15px] leading-tight">{title}</span>
         <span className="block text-[12px] text-muted-foreground mt-0.5 leading-snug">{sub}</span>
@@ -51,25 +51,40 @@ function Tile({ icon: Icon, title, sub, onClick, disabled }: { icon: typeof Came
   );
 }
 
-/** Home: the six things people do most. */
+export function CallMe({ state }: { state: AppState }) {
+  const qc = useQueryClient();
+  const toPhone = state.phone && ringIn() === "phone";
+  const call = useMutation({
+    mutationFn: api.callMe,
+    onSuccess: () => {
+      toast.success(toPhone ? "Calling your phone" : "Ringing below: tap Answer");
+      qc.invalidateQueries({ queryKey: ["state"] });
+    },
+    onError: (error: Error) => toast.error(error.message),
+  });
+  return (
+    <button className="call-action" onClick={() => call.mutate()} disabled={call.isPending}>
+      {call.isPending ? <Loader2 className="size-4 animate-spin" /> : <PhoneCall className="size-4" />}
+      {call.isPending ? "Starting call…" : "Call me"}
+    </button>
+  );
+}
+
 export function QuickActions({ state, onScan, onMeals }: { state: AppState; onScan: () => void; onMeals: () => void }) {
   const qc = useQueryClient();
   const [sheet, setSheet] = useState<Sheet>(null);
   const done = (msg: string) => { toast.success(msg); setSheet(null); qc.invalidateQueries({ queryKey: ["state"] }); };
   const fail = (e: Error) => toast.error(e.message);
-  const toPhone = state.phone && ringIn() === "phone";
-  const callMe = useMutation({ mutationFn: api.callMe, onSuccess: () => done(toPhone ? "Calling your phone" : "Ringing below: tap Answer"), onError: fail });
   const stores = state.swiggy || state.zepto;
   return (
     <>
-      <div className="grid grid-cols-2 gap-3">
-        <Tile icon={Camera} title="Scan" sub="Plate, medicine, prescription, report" onClick={onScan} />
-        <Tile icon={PhoneCall} title="Call me" sub={`Meals, medicines, orders · ${state.language}`} onClick={() => callMe.mutate()} disabled={callMe.isPending} />
+      <div className="action-grid">
+        <Tile icon={Camera} title="Scan a photo" sub="Plate, medicine, prescription, report" onClick={onScan} />
         <Tile icon={ShoppingBasket} title="Groceries" sub={stores ? (state.swiggy ? "Instamart cart, one tap" : "Zepto cart, one tap") : "Stores offline"}
               onClick={() => setSheet("groceries")} />
         <Tile icon={UtensilsCrossed} title="Meal plan" sub="A plate for everyone" onClick={onMeals} />
         <Tile icon={Stethoscope} title="Book a doctor" sub="Your doctors, nearby or online" onClick={() => setSheet("doctor")} />
-        <Tile icon={MessageCircle} title="Ask Pathya" sub="Say it in one sentence" onClick={() => setSheet("ask")} />
+        <Tile icon={MessageCircle} title="Ask Pathya" sub="Type a question or request" onClick={() => setSheet("ask")} />
       </div>
       <Drawer open={sheet !== null} onOpenChange={(o) => !o && setSheet(null)}>
         <DrawerContent className="bg-card border-t max-h-[90dvh]">
