@@ -24,6 +24,13 @@ def dry_run():
     return os.getenv("DRY_RUN", "1") == "1"          # default: no real checkout while building
 
 
+def saved_list_card(items, ref, who, problem):
+    return Card("kitchen", "info", "Your grocery list is saved", list(items), warnings=[problem],
+                question="Build a fresh cart to see the total and payment options?",
+                choices=[{"id": "build_cart", "label": "Build cart"}, {"id": "ok", "label": "Keep list"}],
+                payload={"items": list(items), "ref": ref, "who": who})
+
+
 def for_people(msg):
     """Swiggy's message exactly as sent, minus the instructions it appends for AI clients
     ("[IMPORTANT: Display the above message exactly as-is ...]", "⚠️ A rich UI widget ...")."""
@@ -173,6 +180,8 @@ class KitchenExpert(Expert):
         """A list -> a cart card (Instamart, else Zepto, else the list). Items that clash with a family member's own
         notes (goal, allergies, what the doctor said) are flagged on the card; the human who taps decides."""
         card = await self._cart(text, ref)
+        if card.kind == "info" and "items" in card.payload:
+            card.payload["who"] = who
         if card.kind == "order" and card.lines:
             try:
                 from app.experts.family import guard, profiles as P
@@ -217,6 +226,8 @@ class KitchenExpert(Expert):
                 problem += " " + msg
             except Exception as err:
                 problem += f" Zepto failed too: {err}"
+        if ref:
+            return saved_list_card(items or [text], ref, None, problem)
         return Card(self.name, "info", "Your list (no cart yet)", items or [text], question="",
                     warnings=[problem, "Try again from Kitchen > Type a list when a store is back."],
                     choices=[{"id": "ok", "label": "OK"}], payload={"ref": ref})
@@ -273,6 +284,14 @@ class KitchenExpert(Expert):
 
     async def execute(self, card, choice):
         p = card["payload"]
+        if card["kind"] == "info" and choice == "build_cart" and p.get("items"):
+            try:
+                next_card = await self.handle(", ".join(p["items"]), ref=p["ref"], who=p.get("who"))
+            except Exception:
+                next_card = saved_list_card(p["items"], p["ref"], p.get("who"),
+                                            "The store could not prepare the cart. Please try again later.")
+            self.store.add_card(next_card.to_dict())
+            return {"ok": True, "message": "Cart ready on Home." if next_card.kind == "order" else "List saved on Home."}
         if card["kind"] not in ("order", "plan", "brief"):          # info cards: nothing to commit
             return {"ok": True}
         if card["kind"] == "plan":

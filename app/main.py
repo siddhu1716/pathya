@@ -139,6 +139,8 @@ def state(request: Request):
                     "has_phone": bool(v.get("phone"))} for k, v in hh["people"].items()],
         "clinics": [_doctor_view(hh, k, v) for k, v in hh["clinics"].items()],
         "cards": waiting,
+        "preparing_call_cart": any(call.plan.saved.get(GROCERY_FIELDS.get((call.expert.name, call.job["kind"])))
+                                   for call in st.finishing_calls.copy().values()),
         "recent": store.recent_cards(),
         "jobs": store.upcoming(),
         "ringing": ringing,
@@ -1343,15 +1345,66 @@ async def call_tool(jid: str, body: ToolCall, request: Request):
     return {"output": out, "end": ends_call(body.name, out)}
 
 
-async def _after_call(st, call, jid):
+GROCERY_FIELDS = {("home", "home"): "items", ("kitchen", "list"): "items", ("kitchen", "menu"): "missing"}
+
+
+@api.post("/calls/{jid}/grocery-list")
+async def recover_call_list(jid: str, request: Request):
+    """Recover an older shopping call onto Home. This creates a list for review, never a checkout."""
+    from app.experts.kitchen.call_list import requested_items
+    from app.experts.kitchen.expert import saved_list_card
+    st = _st(request)
+    job, expert = _call_job(request, jid)
+    field = GROCERY_FIELDS.get((expert.name, job["kind"]))
+    facts = st.store.facts(job["person"], f"call:{jid}")
+    if not field or not facts:
+        raise HTTPException(400, "Choose a completed family or kitchen call.")
+    existing = st.store.grocery_card_for_call(jid)
+    if existing:
+        if existing["status"] != "waiting":
+            raise HTTPException(409, "The grocery card for this call was already handled.")
+        return {"card": existing["id"]}
+    if jid in st.finishing_calls:
+        raise HTTPException(409, "Pathya is still preparing the result. Check Home in a moment.")
+    record = facts[0]["value"]
+    saved = record.get("saved", {})
+    if field in saved:
+        items = saved[field]
+    else:
+        try:
+            items = await requested_items(record.get("transcript", []))
+        except Exception:
+            raise HTTPException(503, "Could not read the call right now. Try again or type the list on Home.")
+    if not items:
+        raise HTTPException(422, "No grocery request could be recovered from this call.")
+    card = saved_list_card(items, jid, job["person"], "Recovered from your call. Check the items before building the cart.")
+    return {"card": st.store.add_card(card.to_dict(), aid=f"call-list-{jid}")}
+
+
+async def _after_call(st, call, jid, transcript):
+    saved = call.plan.saved
+    grocery_field = GROCERY_FIELDS.get((call.expert.name, call.job["kind"]))
+    if grocery_field and grocery_field not in saved:
+        # An explicitly empty list is a cancellation. Only recover a missing tool call.
+        from app.experts.kitchen.call_list import requested_items
+        try:
+            items = await requested_items(transcript)
+            if items:
+                saved[grocery_field] = items
+        except Exception:
+            st.store.log(call.expert.name, jid, "Could not recover a grocery list from this call")
     try:
-        card = await call.expert.after_call(call.job, call.plan.saved)
+        card = await call.expert.after_call(call.job, saved)
         if card:
             st.store.add_card(card.to_dict())
         else:
             st.store.log(call.expert.name, jid, "call ended without anything to approve")
     except Exception as err:
         st.store.log(call.expert.name, jid, f"after the call failed: {err}")
+        if grocery_field and saved.get(grocery_field):
+            from app.experts.kitchen.expert import saved_list_card
+            st.store.add_card(saved_list_card(saved[grocery_field], jid, call.job["person"],
+                                              "The cart could not be prepared. Your grocery list is saved.").to_dict())
 
 
 def _finish_call(st, call, jid, transcript, source):
@@ -1363,8 +1416,10 @@ def _finish_call(st, call, jid, transcript, source):
     st.store.remember(call.job["person"], f"call:{jid}",
                       {"transcript": transcript[-200:], "saved": call.plan.saved, "seconds": secs}, source)
     st.store.log(call.expert.name, jid, f"call ended after {secs} s")
-    st.tasks.add(t := asyncio.create_task(_after_call(st, call, jid)))     # e.g. building the cart takes ~30 s
+    st.finishing_calls[jid] = call
+    st.tasks.add(t := asyncio.create_task(_after_call(st, call, jid, transcript[-200:])))
     t.add_done_callback(st.tasks.discard)
+    t.add_done_callback(lambda _: st.finishing_calls.pop(jid, None))
     st.calls.pop(jid, None)
     st.live.pop(jid, None)
 
@@ -1669,6 +1724,7 @@ def build_app(lifespan=None) -> FastAPI:
         return FileResponse(dist / "index.html")
 
     app.state.tasks = set()
+    app.state.finishing_calls = {}
     app.state.calls = {}
     app.state.live = {}
     app.state.twilio = None

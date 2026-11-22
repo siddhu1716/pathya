@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { ScanSheet } from "@/components/Scan";
 import { Button } from "@/components/ui/button";
 import { ApprovalCard } from "@/components/ApprovalCard";
+import { CallCartReview } from "@/components/CallCartReview";
 import { CallHistory } from "@/components/CallHistory";
 import { FamilyStrip, FamilyTab } from "@/components/FamilyTab";
 import { KitchenTab } from "@/components/KitchenTab";
@@ -281,6 +282,7 @@ const Index = () => {
 
         {tab === "home" && (
           <>
+            {!scanning && <CallCartReview cards={cards} />}
             <div className="home-hero">
               <div className="hero-copy">
                 <p className="hero-date">{new Date().toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" })}</p>
@@ -296,6 +298,11 @@ const Index = () => {
               <img className="hero-thali" alt="" src="/thali.webp" width="720" height="720" />
             </div>
 
+            {s.preparing_call_cart && (
+              <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="size-4 animate-spin" /> Preparing the grocery cart from your call…
+              </p>
+            )}
             {cards.length > 0 && (
               <Section label={`For your review · ${cards.length}`}>
                 <div className="space-y-3">{cards.map((row) => <ApprovalCard key={row.id} row={row} />)}</div>
@@ -340,7 +347,7 @@ const Index = () => {
             <Section label="Calls"><CallSettings state={s} /></Section>
             <Section label="Pathya's voice"><VoicePanel /></Section>
             <Section label="Answer my calls"><Forwarding /></Section>
-            <Section label="Call history"><CallHistory /></Section>
+            <Section label="Call history"><CallHistory onReview={() => go("home")} /></Section>
             {s.recent.length > 0 && (
               <Section label="Recently handled">
                 <div className="space-y-3">{s.recent.slice(0, 4).map((row) => <ApprovalCard key={row.id} row={row} />)}</div>

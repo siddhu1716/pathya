@@ -1,12 +1,15 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
 import { ChevronDown, PhoneCall, PhoneIncoming } from "lucide-react";
 import { Panel } from "@/components/kit";
 import { Bubbles } from "@/components/LiveCall";
 import { ago, api, CallRecord } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
-const KIND: Record<string, string> = { list: "Grocery list", book: "Clinic booking", checkin: "Check-in", doorstep: "Delivery call" };
+const KIND: Record<string, string> = { home: "Family call", list: "Grocery list", menu: "Cook’s menu", book: "Clinic booking",
+  checkin: "Check-in", doorstep: "Delivery call" };
 
 function saved(c: CallRecord) {
   const s = c.saved ?? {};
@@ -17,8 +20,13 @@ function saved(c: CallRecord) {
   return s.summary ?? "";
 }
 
-export function CallHistory() {
+export function CallHistory({ onReview }: { onReview: () => void }) {
   const { data } = useQuery({ queryKey: ["calls"], queryFn: api.calls, refetchInterval: 4000 });
+  const qc = useQueryClient();
+  const recover = useMutation({ mutationFn: api.recoverCallList, onSuccess: () => {
+    qc.invalidateQueries({ queryKey: ["state"] });
+    onReview();
+  }, onError: (error: Error) => toast.error(error.message) });
   const [open, setOpen] = useState<string | null>(null);
   if (!data) return null;
   if (!data.length) return <p className="text-muted-foreground text-center py-10">No calls yet.</p>;
@@ -43,6 +51,11 @@ export function CallHistory() {
             {isOpen && (
               <div className="px-4 pb-4">
                 {c.transcript.length ? <Bubbles lines={c.transcript} /> : <p className="text-[13px] text-muted-foreground">No transcript.</p>}
+                {(c.kind === "home" || c.kind === "list" || c.kind === "menu") && (
+                  <Button className="mt-3" variant="outline" disabled={recover.isPending} onClick={() => recover.mutate(c.id)}>
+                    {recover.isPending && recover.variables === c.id ? "Checking the call…" : "Review grocery list on Home"}
+                  </Button>
+                )}
               </div>
             )}
           </div>

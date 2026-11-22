@@ -122,6 +122,7 @@ export type AppState = {
   people: Person[];
   clinics: Clinic[];
   cards: CardRow[];
+  preparing_call_cart?: boolean;
   recent: CardRow[];
   jobs: Job[];
   ringing: Job[];
@@ -197,6 +198,7 @@ export const api = {
   runNow: (id: string) => post<{ ok: boolean }>(`/api/jobs/${id}/run-now`),
   icsUrl: (id: string) => `${server()}/api/cards/${id}/ics${key() ? `?key=${encodeURIComponent(key())}` : ""}`,
   calls: () => request<CallRecord[]>("/api/calls"),
+  recoverCallList: (id: string) => post<{ card: string }>(`/api/calls/${id}/grocery-list`),
   orders: () => request<Order[]>("/api/orders"),
   line: (id: string, line: Line) => post<{ ok: boolean; note?: string | null }>(`/api/calls/${id}/line`, line),
   kitchen: () => request<KitchenOverview>("/api/kitchen/overview"),

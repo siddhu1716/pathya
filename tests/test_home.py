@@ -107,6 +107,92 @@ def test_my_number_gets_the_home_line_in_telugu_and_a_cart_after(monkeypatch):
     assert store.job(jid3)["expert"] == "kitchen"
 
 
+def test_spoken_request_reaches_home_with_payment_options(monkeypatch):
+    from app.core.browser_call import Call
+    from app.experts.kitchen import call_list
+    from app.experts.kitchen.expert import KitchenExpert
+    from app.main import _finish_call
+    app, store, kitchen = env()
+    home = app.state.experts["home"]
+    spoken = [{"role": "them", "text": "I need one litre of milk."}]
+    async def extract(transcript):
+        assert transcript == spoken
+        return ["one litre of milk"]
+    monkeypatch.setattr(call_list, "requested_items", extract)
+    job = store.job(home.answered("test-call"))
+    async def quote(text, ref, who):
+        assert (text, ref, who) == ("one litre of milk", job["id"], "me")
+        return KitchenExpert(store, HH, None, None).card(
+            {"items": [{"itemName": "Milk", "quantity": 1}], "billBreakdown": {"toPay": {"value": "₹60"}}},
+            {"cod": {"available": True}, "platforms": {"mobile": {"methods": [{"id": "gpay"}]}}},
+            {"id": "home", "addressLine": "Example home"}, ref=ref)
+    kitchen.handle = quote
+    call = Call(job, home, home.call_plan(job))
+    async def finish():
+        _finish_call(app.state, call, job["id"], spoken, "phone call")
+        await asyncio.gather(*app.state.tasks)
+    asyncio.run(finish())
+    with TestClient(app) as client:
+        row, = client.get("/api/state").json()["cards"]
+        assert row["card"]["total"] == "₹60" and row["card"]["address"] == "Example home"
+        assert [c["id"] for c in row["card"]["choices"]] == ["COD", "UPI:gpay"]
+        assert client.post(f"/api/calls/{job['id']}/grocery-list").json()["card"] == row["id"]
+    assert store.orders() == [] and kitchen.executed == []
+
+
+def test_failed_call_cart_and_historical_recovery():
+    from app.core.browser_call import Call
+    from app.main import _finish_call
+    app, store, kitchen = env()
+    home = app.state.experts["home"]
+    job = store.job(home.answered("test-call"))
+    call = Call(job, home, home.call_plan(job))
+    call.plan.saved["items"] = ["two packs of curd"]
+    async def fail(*args, **kwargs):
+        raise RuntimeError("test store failure")
+    kitchen.handle = fail
+    async def finish():
+        _finish_call(app.state, call, job["id"], [], "phone call")
+        await asyncio.gather(*app.state.tasks)
+    asyncio.run(finish())
+    old = store.job(home.answered("older-call"))
+    store.remember("me", f"call:{old['id']}", {"saved": {"items": ["1 litre milk"]}}, "phone call")
+    with TestClient(app) as client:
+        row, = client.get("/api/state").json()["cards"]
+        assert row["card"]["lines"] == ["two packs of curd"]
+        assert [c["id"] for c in row["card"]["choices"]] == ["build_cart", "ok"]
+        url = f"/api/calls/{old['id']}/grocery-list"
+        aid = client.post(url).json()["card"]
+        assert client.post(url).json()["card"] == aid and len(store.cards()) == 2
+        assert store.card(aid)["card"]["lines"] == ["1 litre milk"]
+        empty = store.job(home.answered("cancelled-list"))
+        store.remember("me", f"call:{empty['id']}", {"saved": {"items": []}}, "phone call")
+        assert client.post(f"/api/calls/{empty['id']}/grocery-list").status_code == 422
+    assert store.orders() == [] and kitchen.executed == []
+
+
+def test_recover_only_the_callers_words_and_build_a_quote_after_a_retry():
+    from types import SimpleNamespace
+    from app.experts.kitchen.call_list import GroceryList, requested_items
+    from app.experts.kitchen.expert import KitchenExpert, saved_list_card
+    async def extract(*args, **kwargs):
+        return SimpleNamespace(final_output=GroceryList(items=["one litre of milk", "chocolate"]))
+    transcript = [{"role": "ai", "text": "Would you like chocolate?"},
+                  {"role": "them", "text": "Just one litre of milk, please."}]
+    items = asyncio.run(requested_items(transcript, runner=extract))
+    assert items == ["one litre of milk"] and asyncio.run(requested_items([])) == []
+    store = Store(":memory:")
+    kitchen = KitchenExpert(store, HH, None, None)
+    async def quote(text, ref, who):
+        assert (text, ref, who) == ("one litre of milk", "job1", "amma")
+        return Card("kitchen", "order", "Store cart", [text], payload={"ref": ref})
+    kitchen.handle = quote
+    retry = saved_list_card(items, "job1", "amma", "Store unavailable")
+    assert asyncio.run(kitchen.execute(retry.to_dict(), "build_cart"))["ok"]
+    result, = store.cards()
+    assert result["card"]["kind"] == "order" and result["status"] == "waiting" and store.orders() == []
+
+
 def test_daily_check_in_reschedules_and_stops():
     app, store, _ = env()
     home = app.state.experts["home"]

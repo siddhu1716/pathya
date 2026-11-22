@@ -73,12 +73,20 @@ class Store:
         return [dict(r) for r in self.db.execute(q + " ORDER BY ts DESC LIMIT ?", args + [limit])]
 
     # ---- approvals: nothing is committed without a human tap ----
-    def add_card(self, card):
-        aid, now = _new_id(), time.time()
-        self.db.execute("INSERT INTO approvals VALUES (?,?,?,?,?,?,?,?)",
-                        (aid, card["expert"], json.dumps(card), "waiting", None, None, now, now))
-        self.log(card["expert"], aid, f"card: {card['title']}")
+    def add_card(self, card, aid=None):
+        on_conflict = " ON CONFLICT(id) DO NOTHING" if aid else ""
+        aid, now = aid or _new_id(), time.time()
+        inserted = self.db.execute("INSERT INTO approvals VALUES (?,?,?,?,?,?,?,?)" + on_conflict,
+                                   (aid, card["expert"], json.dumps(card), "waiting", None, None, now, now))
+        if inserted.rowcount:
+            self.log(card["expert"], aid, f"card: {card['title']}")
         return aid
+
+    def grocery_card_for_call(self, jid):
+        row = self.db.execute("SELECT id, status FROM approvals WHERE expert='kitchen' AND "
+                              "json_extract(card, '$.payload.ref')=? ORDER BY (status='waiting') DESC, created DESC LIMIT 1",
+                              (jid,)).fetchone()
+        return dict(row) if row else None
 
     def claim(self, aid, choice):
         """waiting -> running exactly once; a second tap gets None (double-tap guard)."""
